@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import AntiTubeLogo from "./AntiTubeLogo";
+import LogoutButton from "./LogoutButton";
 
 type AnalysisResponse = { message: string; analysis: { url: string; domain: string; platform: string; videoOnly: boolean } };
 type PlaylistEntry = { index: number; id: string | null; title: string; sourceUrl: string | null; durationSeconds: number | null; thumbnailUrl: string | null };
@@ -129,7 +130,7 @@ export default function Home() {
     : 0;
 
   return <>
-    <header className="site-header"><a className="brand" href="/" aria-label="AntiTube, inicio"><AntiTubeLogo /></a><nav className="site-nav" aria-label="Navegación principal"><a className="site-nav-link active" href="/">Descargar</a><a className="site-nav-link" href="/shazam">SHAZAM</a></nav></header>
+    <header className="site-header"><a className="brand" href="/" aria-label="AntiTube, inicio"><AntiTubeLogo /></a><nav className="site-nav" aria-label="Navegación principal"><a className="site-nav-link active" href="/">Descargar</a><a className="site-nav-link" href="/shazam">SHAZAM</a><LogoutButton /></nav></header>
     <main className="shell">
       <form className="link-form" onSubmit={handleSubmit}><span className="link-symbol">↗</span><label className="sr-only" htmlFor="media-url">Enlace del vídeo o audio</label><input id="media-url" type="url" required value={url} onChange={(event) => setUrl(event.target.value)} placeholder="Pega aquí el enlace de tu vídeo o audio…" /><button disabled={isLoading}>{isLoading ? "Analizando…" : "Analizar enlace"}</button></form>
       <div className="form-note"><span>Conexión local. No se descarga nada al analizar.</span></div>

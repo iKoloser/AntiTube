@@ -118,7 +118,7 @@ En PowerShell, `copy` también funciona como alias de `Copy-Item`. El archivo `.
 
 ### Acceso privado
 
-AntiTube está preparado para alojarse online con un único usuario. Define `ANTITUBE_ACCESS_KEY` en `.env` con una clave larga y aleatoria. La clave se valida en el backend y la sesión se mantiene mediante una cookie `HttpOnly`; nunca se expone como variable pública del frontend ni debe subirse a GitHub.
+AntiTube está preparado para alojarse online con un único usuario. Define `ANTITUBE_ACCESS_KEY` en `.env` con una clave larga y aleatoria. La clave se valida en el backend y la sesión se mantiene mediante una cookie `HttpOnly`; nunca se expone como variable pública del frontend ni debe subirse a GitHub. El acceso incluye límite de intentos configurable y un botón **Salir** en la interfaz.
 
 En producción, sirve frontend y backend mediante HTTPS para que la cookie tenga protección `Secure` y para que la captura de audio de SHAZAM funcione correctamente.
 

@@ -24,6 +24,9 @@ const shazamTimeoutMs = Number(process.env.SHAZAM_TIMEOUT_MS ?? 60_000);
 const ffmpegTimeoutMs = Number(process.env.FFMPEG_TIMEOUT_MS ?? 30_000);
 const accessKey = process.env.ANTITUBE_ACCESS_KEY?.trim() ?? "";
 const sessionCookieName = "antitube_session";
+const authRateLimitMax = Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10);
+const authRateLimitWindowMs = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000);
+const authAttempts = new Map<string, { count: number; resetAt: number }>();
 const downloadDirectory = path.resolve(process.cwd(), process.env.DOWNLOAD_DIR ?? "../downloads");
 let activeDownloads = 0;
 
@@ -39,6 +42,7 @@ const downloadJobs = new Map<string, DownloadJob>();
 
 app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: "20mb" }));
+app.set("trust proxy", process.env.NODE_ENV === "production");
 
 function parseCookies(request: Request): Record<string, string> {
   const header = request.headers.cookie ?? "";
@@ -143,13 +147,25 @@ app.post("/api/auth/login", (request: Request, response: Response) => {
     response.status(503).json({ error: "Autenticación no configurada", message: "Define ANTITUBE_ACCESS_KEY en el archivo .env del backend." });
     return;
   }
+  const address = request.ip || request.socket.remoteAddress || "unknown";
+  const now = Date.now();
+  const previous = authAttempts.get(address);
+  const attempt = previous && previous.resetAt > now ? previous : { count: 0, resetAt: now + authRateLimitWindowMs };
+  if (attempt.count >= authRateLimitMax) {
+    response.setHeader("Retry-After", Math.ceil((attempt.resetAt - now) / 1000));
+    response.status(429).json({ error: "Demasiados intentos", message: "Espera unos minutos antes de volver a intentarlo." });
+    return;
+  }
   const submittedKey = typeof request.body?.key === "string" ? request.body.key : "";
   const expected = Buffer.from(accessKey);
   const received = Buffer.from(submittedKey);
   if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+    attempt.count += 1;
+    authAttempts.set(address, attempt);
     response.status(401).json({ error: "Clave incorrecta", message: "La clave no es válida." });
     return;
   }
+  authAttempts.delete(address);
   setSessionCookie(response, sessionToken(), 60 * 60 * 24 * 7);
   response.json({ authenticated: true });
 });
