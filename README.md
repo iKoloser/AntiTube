@@ -211,13 +211,3 @@ python -m pip install -r backend\requirements.txt
 
 Si tienes varias instalaciones de Python, configura `PYTHON_BIN` con la ruta completa del ejecutable.
 
-## Desarrollo con Git
-
-Los cambios importantes se guardan en commits descriptivos. Para revisar el estado y el historial:
-
-```bash
-git status
-git log --oneline --decorate -10
-```
-
-Las descargas, secretos y dependencias generadas están excluidos mediante `.gitignore`.
