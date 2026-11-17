@@ -207,7 +207,7 @@ También puedes iniciar el proyecto con `iniciar-antitube.bat`, que localiza `pn
 
 ### SHAZAM no recibe audio
 
-Usa Chrome o Edge, reproduce la música en otra pestaña y comparte **una pestaña del navegador**, no una ventana ni la pantalla completa. Activa **Compartir audio** en el diálogo del navegador. El audio se procesa localmente mediante el backend y el archivo temporal se elimina después del reconocimiento.
+Usa Chrome o Edge, reproduce la música en otra pestaña. Activa **Compartir audio** en el diálogo del navegador. El audio se procesa localmente mediante el backend y el archivo temporal se elimina después del reconocimiento.
 
 ### El backend no encuentra ShazamIO
 
@@ -219,13 +219,3 @@ python -m pip install -r backend\requirements.txt
 
 Si tienes varias instalaciones de Python, configura `PYTHON_BIN` con la ruta completa del ejecutable.
 
-## Desarrollo con Git
-
-Los cambios importantes se guardan en commits descriptivos. Para revisar el estado y el historial:
-
-```bash
-git status
-git log --oneline --decorate -10
-```
-
-Las descargas, secretos y dependencias generadas están excluidos mediante `.gitignore`.
