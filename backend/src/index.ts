@@ -2,7 +2,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import express, { type Request, type Response } from "express";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -22,6 +22,8 @@ const playlistMetadataTimeoutMs = Number(process.env.PLAYLIST_METADATA_TIMEOUT_M
 const maxPlaylistItems = Number(process.env.MAX_PLAYLIST_ITEMS ?? 50);
 const shazamTimeoutMs = Number(process.env.SHAZAM_TIMEOUT_MS ?? 60_000);
 const ffmpegTimeoutMs = Number(process.env.FFMPEG_TIMEOUT_MS ?? 30_000);
+const accessKey = process.env.ANTITUBE_ACCESS_KEY?.trim() ?? "";
+const sessionCookieName = "antitube_session";
 const downloadDirectory = path.resolve(process.cwd(), process.env.DOWNLOAD_DIR ?? "../downloads");
 let activeDownloads = 0;
 
@@ -35,8 +37,44 @@ type DownloadJob = {
 
 const downloadJobs = new Map<string, DownloadJob>();
 
-app.use(cors({ origin: corsOrigin }));
+app.use(cors({ origin: corsOrigin, credentials: true }));
 app.use(express.json({ limit: "20mb" }));
+
+function parseCookies(request: Request): Record<string, string> {
+  const header = request.headers.cookie ?? "";
+  return Object.fromEntries(header.split(";").map((part) => part.trim().split("=")).filter(([name, value]) => name && value).map(([name, ...value]) => [name, decodeURIComponent(value.join("="))]));
+}
+
+function sessionToken(): string {
+  return createHmac("sha256", accessKey).update("antitube-session-v1").digest("hex");
+}
+
+function hasValidSession(request: Request): boolean {
+  if (!accessKey) return false;
+  const received = parseCookies(request)[sessionCookieName] ?? "";
+  const expected = sessionToken();
+  if (received.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(received), Buffer.from(expected));
+}
+
+function setSessionCookie(response: Response, token: string, maxAgeSeconds: number): void {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  response.setHeader("Set-Cookie", `${sessionCookieName}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeSeconds}; HttpOnly; SameSite=Lax${secure}`);
+}
+
+app.use("/api", (request: Request, response: Response, next) => {
+  const publicRoute = (request.method === "POST" && request.path === "/auth/login")
+    || (request.method === "GET" && request.path === "/auth/session");
+  if (publicRoute) {
+    next();
+    return;
+  }
+  if (!hasValidSession(request)) {
+    response.status(accessKey ? 401 : 503).json({ error: "Acceso protegido", message: accessKey ? "Introduce la clave de AntiTube para continuar." : "ANTITUBE_ACCESS_KEY no está configurada en el backend." });
+    return;
+  }
+  next();
+});
 
 type Analysis = {
   url: string;
@@ -98,6 +136,31 @@ function analyzeDownloadSource(value: unknown): Analysis | null {
   }
   return analyzeUrl(value);
 }
+
+app.post("/api/auth/login", (request: Request, response: Response) => {
+  if (!accessKey) {
+    response.status(503).json({ error: "Autenticación no configurada", message: "Define ANTITUBE_ACCESS_KEY en el archivo .env del backend." });
+    return;
+  }
+  const submittedKey = typeof request.body?.key === "string" ? request.body.key : "";
+  const expected = Buffer.from(accessKey);
+  const received = Buffer.from(submittedKey);
+  if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+    response.status(401).json({ error: "Clave incorrecta", message: "La clave no es válida." });
+    return;
+  }
+  setSessionCookie(response, sessionToken(), 60 * 60 * 24 * 7);
+  response.json({ authenticated: true });
+});
+
+app.get("/api/auth/session", (request: Request, response: Response) => {
+  response.json({ authenticated: hasValidSession(request) });
+});
+
+app.post("/api/auth/logout", (_request: Request, response: Response) => {
+  setSessionCookie(response, "", 0);
+  response.json({ authenticated: false });
+});
 
 app.get("/api/health", (_request: Request, response: Response) => {
   response.json({ status: "ok", service: "antitube-backend" });

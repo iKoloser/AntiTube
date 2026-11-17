@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import FuturisticBackground from "./FuturisticBackground";
+import AuthGate from "./AuthGate";
 
 export const metadata: Metadata = {
   title: "AntiTube",
@@ -12,7 +13,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="es">
       <body>
         <FuturisticBackground />
-        {children}
+        <AuthGate>{children}</AuthGate>
       </body>
     </html>
   );

@@ -69,7 +69,7 @@ export default function Home() {
     setError(null);
     setIsMetadataLoading(true);
     try {
-      const response = await fetch(`${apiUrl}/api/metadata`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, playlist: playlistOverride }) });
+      const response = await fetch(`${apiUrl}/api/metadata`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, playlist: playlistOverride }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message ?? "No se pudieron consultar los metadatos.");
       setMetadata(data as MetadataResponse);
@@ -81,7 +81,7 @@ export default function Home() {
     event.preventDefault(); setIsLoading(true); setError(null); setResult(null); setMetadata(null); setDownload(null); setDownloadLogs([]);
     try {
       const playlistDetected = looksLikePlaylist(url);
-      const response = await fetch(`${apiUrl}/api/analyze`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+      const response = await fetch(`${apiUrl}/api/analyze`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message ?? "No se pudo analizar la URL.");
       const nextResult = data as AnalysisResponse;
@@ -95,13 +95,13 @@ export default function Home() {
   async function handleDownload() {
     setIsDownloadLoading(true); setError(null); setDownload(null); setDownloadProgress(null); setDownloadLogs([]);
     try {
-      const response = await fetch(`${apiUrl}/api/download`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, format, quality: format === "mp4" ? videoQuality : audioQuality, playlist, playlistTotal: metadata?.metadata.isPlaylist ? metadata.metadata.playlistCount : null, playlistTitle: metadata?.metadata.isPlaylist ? metadata.metadata.playlistTitle : null }) });
+      const response = await fetch(`${apiUrl}/api/download`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, format, quality: format === "mp4" ? videoQuality : audioQuality, playlist, playlistTotal: metadata?.metadata.isPlaylist ? metadata.metadata.playlistCount : null, playlistTitle: metadata?.metadata.isPlaylist ? metadata.metadata.playlistTitle : null }) });
       const data = await response.json() as DownloadJobResponse;
       if (!response.ok) throw new Error((data as unknown as { message?: string }).message ?? "No se pudo iniciar la descarga.");
       let job = data; setDownloadProgress(job.progress); setDownloadLogs(job.logs ?? []);
       while (job.status !== "completed" && job.status !== "failed") {
         await new Promise((resolve) => setTimeout(resolve, 700));
-        const progressResponse = await fetch(`${apiUrl}/api/download/${job.jobId}`);
+        const progressResponse = await fetch(`${apiUrl}/api/download/${job.jobId}`, { credentials: "include" });
         job = await progressResponse.json() as DownloadJobResponse;
         if (!progressResponse.ok) throw new Error(job.error?.message ?? "No se pudo consultar el progreso.");
         setDownloadProgress(job.progress); setDownloadLogs(job.logs ?? []);

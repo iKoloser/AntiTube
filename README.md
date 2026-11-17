@@ -30,6 +30,7 @@ AntiTube es una aplicación web privada y local para trabajar con contenido mult
 - Pestaña **SHAZAM** con captura de audio del navegador, reconocimiento y enlaces a YouTube, SoundCloud, Spotify y Shazam.
 - Descargas MP3 desde YouTube/SoundCloud en los resultados de SHAZAM; Spotify se muestra como enlace oficial.
 - Actividad del backend y progreso visible durante las tareas largas.
+- Acceso privado de una sola clave, sin registro ni usuarios.
 
 ## Vista del proyecto
 
@@ -115,6 +116,12 @@ pnpm install
 
 En PowerShell, `copy` también funciona como alias de `Copy-Item`. El archivo `.env` define el puerto de Express, el origen permitido por CORS y la URL pública del backend.
 
+### Acceso privado
+
+AntiTube está preparado para alojarse online con un único usuario. Define `ANTITUBE_ACCESS_KEY` en `.env` con una clave larga y aleatoria. La clave se valida en el backend y la sesión se mantiene mediante una cookie `HttpOnly`; nunca se expone como variable pública del frontend ni debe subirse a GitHub.
+
+En producción, sirve frontend y backend mediante HTTPS para que la cookie tenga protección `Secure` y para que la captura de audio de SHAZAM funcione correctamente.
+
 Comprueba las herramientas multimedia:
 
 ```powershell
@@ -177,6 +184,7 @@ curl -X POST http://localhost:4000/api/analyze -H "Content-Type: application/jso
 - `GET /api/download/:jobId`: devuelve el estado (`queued`, `downloading`, `completed` o `failed`), porcentaje, velocidad, ETA, últimas líneas de actividad del backend y, al terminar, el enlace de descarga. Para una playlist genera un único ZIP con el nombre de la playlist y canciones con el título del vídeo; para una descarga individual devuelve un archivo con su título. Para MP4 se admiten `best`, `360`, `480`, `720` y `1080`; para MP3, `128`, `192`, `256` y `320` kbps. Con `playlist: true` descarga hasta `MAX_PLAYLIST_ITEMS` elementos (50 por defecto), con un límite de 500 MB por archivo y una tarea simultánea.
 - `GET /api/downloads/:filename`: sirve un archivo generado por una descarga válida.
 - `POST /api/shazam/recognize`: recibe un fragmento de audio en base64, lo reconoce con ShazamIO y devuelve título, artista, portada y enlaces para YouTube, SoundCloud y Spotify. Desde la interfaz, YouTube y SoundCloud permiten buscar y preparar una descarga MP3; Spotify se mantiene como enlace oficial.
+- `POST /api/auth/login`, `GET /api/auth/session` y `POST /api/auth/logout`: gestionan el acceso de clave única. El resto de endpoints requiere una sesión válida.
 
 La interfaz muestra automáticamente título, miniatura, plataforma y enlace al contenido original. También incluye un índice visible de plataformas: YouTube, TikTok, Twitch Clips, Twitter/X, Vimeo, Instagram, Facebook, Reddit, SoundCloud, Bandcamp, Dailymotion, Bilibili, Rumble, Kick, VK y Streamable, además de otros sitios compatibles con `yt-dlp`. La pestaña **SHAZAM** permite compartir una pestaña con audio, grabar hasta 12 segundos y consultar la canción reconocida en YouTube, SoundCloud y Spotify. Si la URL parece una playlist, la detecta automáticamente, muestra sus canciones numeradas antes de descargar, marca visualmente las ya procesadas y ofrece un único botón para descargar toda la playlist. En ese caso la preview usa un placeholder de playlist y el resumen indica un ZIP, no un MP3. Twitter/X, TikTok y Twitch Clips se analizan y descargan mediante `yt-dlp`, con MP4 obligatorio para TikTok y Twitch Clips.
 

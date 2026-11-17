@@ -81,6 +81,7 @@ export default function ShazamPage() {
       const source = `${prefix}:${recognition.artist} - ${recognition.title}`;
       const response = await fetch(`${apiUrl}/api/download`, {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: source, format: "mp3", quality: "192", playlist: false })
       });
@@ -88,7 +89,7 @@ export default function ShazamPage() {
       if (!response.ok) throw new Error(job.message ?? "No se pudo iniciar la descarga.");
       while (job.status !== "completed" && job.status !== "failed") {
         await new Promise((resolve) => setTimeout(resolve, 700));
-        const progressResponse = await fetch(`${apiUrl}/api/download/${job.jobId}`);
+        const progressResponse = await fetch(`${apiUrl}/api/download/${job.jobId}`, { credentials: "include" });
         job = await progressResponse.json() as DownloadJobResponse;
         if (!progressResponse.ok) throw new Error(job.error?.message ?? "No se pudo consultar el progreso.");
       }
@@ -147,7 +148,7 @@ export default function ShazamPage() {
         try {
           const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
           const audioBase64 = await blobAsBase64(blob);
-          const response = await fetch(`${apiUrl}/api/shazam/recognize`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioBase64, mimeType: blob.type }) });
+          const response = await fetch(`${apiUrl}/api/shazam/recognize`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioBase64, mimeType: blob.type }) });
           const data = await response.json() as RecognitionResponse & { message?: string };
           if (!response.ok) throw new Error(data.message ?? "No se pudo reconocer el audio.");
           setRecognition(data.recognition);
