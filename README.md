@@ -199,7 +199,7 @@ También puedes iniciar el proyecto con `iniciar-antitube.bat`, que localiza `pn
 
 ### SHAZAM no recibe audio
 
-Usa Chrome o Edge, reproduce la música en otra pestaña y comparte **una pestaña del navegador**, no una ventana ni la pantalla completa. Activa **Compartir audio** en el diálogo del navegador. El audio se procesa localmente mediante el backend y el archivo temporal se elimina después del reconocimiento.
+Usa Chrome o Edge, reproduce la música en otra pestaña. Activa **Compartir audio** en el diálogo del navegador. El audio se procesa localmente mediante el backend y el archivo temporal se elimina después del reconocimiento.
 
 ### El backend no encuentra ShazamIO
 
