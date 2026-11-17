@@ -1,0 +1,16 @@
+{
+  "name": "antitube",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "dev": "concurrently \"pnpm --filter frontend dev\" \"pnpm --filter backend dev\"",
+    "build": "pnpm --filter backend build && pnpm --filter frontend build",
+    "typecheck": "pnpm --filter backend typecheck && pnpm --filter frontend typecheck",
+    "tools:check": "yt-dlp --version && ffmpeg -version",
+    "start": "concurrently \"pnpm --filter frontend start\" \"pnpm --filter backend start\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

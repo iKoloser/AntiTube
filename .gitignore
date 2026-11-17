@@ -1,0 +1,21 @@
+# Dependencias y compilados
+node_modules/
+**/node_modules/
+.next/
+dist/
+coverage/
+downloads/
+
+# Variables locales y sistema
+.env
+.env.local
+!.env.example
+.DS_Store
+*.log
+*.tsbuildinfo
+
+# Copias y metadatos locales que no forman parte de la aplicación
+frontend/package-lock.json
+frontend - copia/
+.hallmark/
+run.txt
