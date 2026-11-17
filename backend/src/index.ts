@@ -64,7 +64,8 @@ function setSessionCookie(response: Response, token: string, maxAgeSeconds: numb
 
 app.use("/api", (request: Request, response: Response, next) => {
   const publicRoute = (request.method === "POST" && request.path === "/auth/login")
-    || (request.method === "GET" && request.path === "/auth/session");
+    || (request.method === "GET" && request.path === "/auth/session")
+    || (request.method === "GET" && request.path === "/health");
   if (publicRoute) {
     next();
     return;
