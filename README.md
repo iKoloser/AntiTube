@@ -1,6 +1,63 @@
 # AntiTube
 
-AntiTube es una aplicación web privada y local para iniciar el trabajo educativo con contenido multimedia. Recibe una URL, comprueba que sea válida e identifica su dominio o plataforma. En esta etapa se ejecuta directamente en Windows y puede consultar metadatos con `yt-dlp` (título, canal y duración) sin descargar contenido.
+<p align="center">
+  <img src="frontend/public/antitube-logo.png" alt="Logo de AntiTube" width="720" />
+</p>
+
+<p align="center">
+  Aplicación multimedia local, privada y educativa para analizar, reconocer y descargar contenido autorizado.
+</p>
+
+<p align="center">
+  <a href="#inicio-rápido">Inicio rápido</a> ·
+  <a href="#funcionalidades">Funcionalidades</a> ·
+  <a href="#arquitectura">Arquitectura</a> ·
+  <a href="#solución-de-problemas">Solución de problemas</a>
+</p>
+
+> AntiTube está pensado para ejecutarse en tu propio ordenador. Úsalo únicamente con contenido que tengas derecho a descargar o transformar.
+
+AntiTube es una aplicación web privada y local para trabajar con contenido multimedia con fines educativos. Recibe una URL, identifica su plataforma, consulta metadatos y permite preparar salidas MP4 o MP3 mediante `yt-dlp` y FFmpeg. También incorpora una pestaña SHAZAM para capturar hasta 12 segundos del audio de una pestaña del navegador y reconocer la canción con ShazamIO.
+
+## Funcionalidades
+
+- Análisis local de URLs y detección de plataforma.
+- Preview de título, canal, duración, miniatura y dominio antes de descargar.
+- Descarga de vídeo MP4 con calidades seleccionables.
+- Extracción de audio MP3 con calidades de 128 a 320 kbps.
+- Playlists con lista previa, progreso por elemento y un único ZIP final.
+- Descargas de YouTube, SoundCloud, TikTok, Twitch Clips, Twitter/X y otros sitios compatibles con `yt-dlp`.
+- Pestaña **SHAZAM** con captura de audio del navegador, reconocimiento y enlaces a YouTube, SoundCloud, Spotify y Shazam.
+- Descargas MP3 desde YouTube/SoundCloud en los resultados de SHAZAM; Spotify se muestra como enlace oficial.
+- Actividad del backend y progreso visible durante las tareas largas.
+
+## Vista del proyecto
+
+El logo utilizado por la interfaz se incluye en el repositorio para que GitHub pueda mostrarlo sin depender de servicios externos:
+
+![Logo de AntiTube](frontend/public/antitube-logo.png)
+
+El flujo principal de la aplicación es:
+
+```mermaid
+flowchart LR
+    A[Frontend Next.js] -->|HTTP local| B[API Express]
+    B --> C[yt-dlp]
+    B --> D[FFmpeg]
+    B --> E[ShazamIO]
+    C --> F[downloads/]
+    D --> F
+```
+
+## Arquitectura
+
+| Parte | Tecnología | Puerto |
+| --- | --- | ---: |
+| Interfaz | Next.js, React, TypeScript, Tailwind/PostCSS | `3000` |
+| API | Express, TypeScript | `4000` |
+| Descargas | yt-dlp | proceso local |
+| Conversión | FFmpeg | proceso local |
+| Reconocimiento | Python + ShazamIO | proceso local |
 
 ## Estructura
 
@@ -47,7 +104,7 @@ python -m pip install -r backend/requirements.txt
 
 ShazamIO reconoce un fragmento de audio desde un archivo o bytes y devuelve los datos de la canción. [Documentación de ShazamIO](https://github.com/shazamio/ShazamIO).
 
-## Instalación y configuración local
+## Inicio rápido
 
 Desde la raíz del proyecto, crea tu archivo de variables y descarga las dependencias:
 
@@ -126,3 +183,41 @@ La interfaz muestra automáticamente título, miniatura, plataforma y enlace al 
 ## Pendiente
 
 Las descargas requieren que tengas autorización para usar el contenido y respeten las condiciones de la plataforma. Docker sigue pendiente como empaquetado final; el desarrollo actual funciona directamente con Node.js, `yt-dlp` y FFmpeg.
+
+## Solución de problemas
+
+### `yt-dlp no está instalado o no está disponible en PATH`
+
+Comprueba la herramienta y reinicia PowerShell para actualizar el `PATH`:
+
+```powershell
+yt-dlp --version
+ffmpeg -version
+```
+
+También puedes iniciar el proyecto con `iniciar-antitube.bat`, que localiza `pnpm`, `yt-dlp` y Python antes de arrancar los servidores.
+
+### SHAZAM no recibe audio
+
+Usa Chrome o Edge, reproduce la música en otra pestaña y comparte **una pestaña del navegador**, no una ventana ni la pantalla completa. Activa **Compartir audio** en el diálogo del navegador. El audio se procesa localmente mediante el backend y el archivo temporal se elimina después del reconocimiento.
+
+### El backend no encuentra ShazamIO
+
+Instala la dependencia con el mismo Python configurado en `.env`:
+
+```powershell
+python -m pip install -r backend\requirements.txt
+```
+
+Si tienes varias instalaciones de Python, configura `PYTHON_BIN` con la ruta completa del ejecutable.
+
+## Desarrollo con Git
+
+Los cambios importantes se guardan en commits descriptivos. Para revisar el estado y el historial:
+
+```bash
+git status
+git log --oneline --decorate -10
+```
+
+Las descargas, secretos y dependencias generadas están excluidos mediante `.gitignore`.
