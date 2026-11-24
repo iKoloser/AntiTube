@@ -10,7 +10,7 @@ import { promisify } from "node:util";
 import { createPlaylistArchive } from "./archive.js";
 import { DownloadLimitError, DownloadToolUnavailableError, downloadMedia, type AudioQuality, type DownloadFormat, type DownloadProgress, type VideoQuality } from "./downloader.js";
 import { ExtractorLookupError, ExtractorUnavailableError, getMediaMetadata } from "./extractor.js";
-import { detectTools, runSetup, setupStatus, updateYtDlp } from "./setup.js";
+import { checkUpdates, detectTools, runSetup, runUpdate, setupStatus, type SetupStepId } from "./setup.js";
 
 // En la versión de escritorio la configuración llega por variables de entorno
 // desde la app Tauri; no se leen archivos .env.
@@ -258,12 +258,14 @@ app.post("/api/setup/install", (request: Request, response: Response) => {
   response.status(started ? 202 : 409).json(setupStatus());
 });
 
-app.post("/api/setup/update-ytdlp", async (_request: Request, response: Response) => {
-  try {
-    response.json({ message: await updateYtDlp(), status: setupStatus() });
-  } catch (error) {
-    response.status(500).json({ error: "No se pudo actualizar", message: error instanceof Error ? error.message : "Error inesperado." });
-  }
+app.post("/api/setup/check-updates", async (_request: Request, response: Response) => {
+  await checkUpdates();
+  response.json(setupStatus());
+});
+
+app.post("/api/setup/update", (request: Request, response: Response) => {
+  const started = runUpdate(request.body?.id as SetupStepId);
+  response.status(started ? 202 : 409).json(setupStatus());
 });
 
 app.get("/api/desktop/info", (_request: Request, response: Response) => {

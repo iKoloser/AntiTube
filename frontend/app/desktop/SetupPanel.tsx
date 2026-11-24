@@ -13,9 +13,10 @@ export type SetupStep = {
   version: string | null;
   source: "bundled" | "managed" | "system" | null;
   percent: number | null;
+  update?: { latest: string | null; available: boolean; canUpdate: boolean; note: string; checkedAt: number } | null;
 };
 
-export type SetupStatus = { ready: boolean; running: boolean; error: string | null; platform: string; toolsDirectory: string; steps: SetupStep[] };
+export type SetupStatus = { ready: boolean; running: boolean; checkingUpdates?: boolean; error: string | null; platform: string; toolsDirectory: string; steps: SetupStep[] };
 
 const statusLabel: Record<SetupStep["status"], string> = {
   pending: "Pendiente",
@@ -40,7 +41,7 @@ function StepIcon({ step, index }: Readonly<{ step: SetupStep; index: number }>)
   return <span className="setup-step-icon" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>;
 }
 
-export function SetupSteps({ steps }: Readonly<{ steps: SetupStep[] }>) {
+export function SetupSteps({ steps, onUpdate, busy = false }: Readonly<{ steps: SetupStep[]; onUpdate?: (id: SetupStep["id"]) => void; busy?: boolean }>) {
   return <ol className="setup-steps">
     {steps.map((step, index) => <li key={step.id} className={`setup-step is-${step.status}`}>
       <StepIcon step={step} index={index} />
@@ -54,6 +55,10 @@ export function SetupSteps({ steps }: Readonly<{ steps: SetupStep[] }>) {
           <span>{step.detail}</span>
           {step.version && <span className="setup-version">{step.version}{step.source ? ` · ${sourceLabel[step.source]}` : ""}</span>}
         </div>
+        {step.update && step.status === "done" && <div className={`setup-update${step.update.available ? " is-available" : ""}`}>
+          <span>{step.update.available ? "↑ " : "✓ "}{step.update.note}</span>
+          {step.update.available && step.update.canUpdate && onUpdate && <button type="button" className="setup-secondary" disabled={busy} onClick={() => onUpdate(step.id)}>Actualizar</button>}
+        </div>}
         {step.status === "running" && <div className={`setup-progress${step.percent === null ? " is-indeterminate" : ""}`}><div style={step.percent === null ? undefined : { width: `${step.percent}%` }} /></div>}
       </div>
     </li>)}
@@ -107,16 +112,17 @@ export default function SetupPanel({ onContinue, compact = false }: Readonly<{ o
   const { status, requestError, post } = useSetupStatus();
   const [includeShazam, setIncludeShazam] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [isUpdating, setIsUpdating] = useState(false);
+  const [isChecking, setIsChecking] = useState(false);
 
   if (!status) return <div className="setup-card"><p className="setup-muted">{requestError ?? "Comprobando herramientas…"}</p></div>;
 
   const busy = status.running || status.steps.some((step) => step.status === "checking" || step.status === "running");
-  const missingRequired = status.steps.filter((step) => !step.optional && step.status !== "done");
+  const missingRequired = status.steps.filter((step) => !step.optional && (step.status === "pending" || step.status === "error"));
   const shazamStep = status.steps.find((step) => step.id === "shazam");
   const shazamInstallable = shazamStep?.status === "pending" || shazamStep?.status === "error";
   const needsAction = missingRequired.length > 0 || (includeShazam && shazamInstallable);
-  const managedYtDlp = status.steps.find((step) => step.id === "ytdlp")?.source === "managed";
+  const pendingUpdates = status.steps.filter((step) => step.update?.available && step.update.canUpdate);
+  const checkedAt = status.steps.map((step) => step.update?.checkedAt ?? 0).reduce((a, b) => Math.max(a, b), 0);
   const completed = status.steps.filter((step) => step.status === "done").length;
 
   async function install() {
@@ -124,33 +130,55 @@ export default function SetupPanel({ onContinue, compact = false }: Readonly<{ o
     await post("/api/setup/install", { includeShazam: includeShazam && shazamInstallable });
   }
 
-  async function updateYtDlp() {
-    setIsUpdating(true);
+  async function checkForUpdates() {
+    setIsChecking(true);
     setNotice(null);
     try {
-      const data = await post("/api/setup/update-ytdlp");
-      setNotice(data.message ?? "Comprobación terminada.");
+      const data = await post("/api/setup/check-updates") as SetupStatus;
+      const available = data.steps?.filter((step) => step.update?.available).length ?? 0;
+      setNotice(available > 0 ? `Hay ${available} actualización${available > 1 ? "es" : ""} disponible${available > 1 ? "s" : ""}.` : "Todo está al día.");
     } finally {
-      setIsUpdating(false);
+      setIsChecking(false);
     }
   }
 
+  async function applyUpdate(id: SetupStep["id"]) {
+    setNotice(null);
+    await post("/api/setup/update", { id });
+  }
+
+  async function applyAll() {
+    // Se aplican de una en una: el backend solo ejecuta una tarea a la vez.
+    for (const step of pendingUpdates) {
+      await post("/api/setup/update", { id: step.id });
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        const response = await fetch(`${apiUrl()}/api/setup/status`);
+        const current = await response.json() as SetupStatus;
+        if (!current.running) break;
+      }
+    }
+  }
+
+
   return <div className={`setup-card${compact ? " is-compact" : ""}`}>
     <div className="setup-card-head">
-      <div><p className="setup-kicker">{status.ready ? "Todo preparado" : "Primer arranque"}</p><h2>{status.ready ? "Herramientas listas" : "Preparemos AntiTube"}</h2></div>
+      <div><p className="setup-kicker">{compact ? "Herramientas" : status.ready ? "Todo preparado" : "Primer arranque"}</p><h2>{compact ? "Estado y actualizaciones" : status.ready ? "Herramientas listas" : "Preparemos AntiTube"}</h2></div>
       <span className="setup-counter">{completed}/{status.steps.length}</span>
     </div>
     {!status.ready && !compact && <p className="setup-muted">AntiTube necesita dos herramientas libres para descargar y convertir. Se instalan una sola vez en tu carpeta de usuario, sin permisos de administrador.</p>}
-    <SetupSteps steps={status.steps} />
+    <SetupSteps steps={status.steps} busy={busy} onUpdate={(id) => void applyUpdate(id)} />
     {status.error && <div className="notice error" role="alert">ⓘ <span>{status.error}</span></div>}
     {notice && <div className="notice" role="status">{notice}</div>}
     {shazamInstallable && <label className="setup-option"><input type="checkbox" checked={includeShazam} disabled={busy} onChange={(event) => setIncludeShazam(event.target.checked)} /><span>Instalar también SHAZAM para reconocer canciones <small>({shazamStep?.version ? "usa tu Python" : "descarga un Python privado, unos 30 MB"})</small></span></label>}
     <div className="setup-actions">
-      {needsAction && <button type="button" className="download-button" disabled={busy} onClick={() => void install()}>{busy ? "Instalando…" : status.error ? "Reintentar instalación" : missingRequired.length > 0 ? "Instalar y continuar" : "Instalar SHAZAM"}</button>}
+      {(needsAction || (busy && !status.ready && !compact)) && <button type="button" className="download-button" disabled={busy} onClick={() => void install()}>{busy ? "Instalando…" : status.error ? "Reintentar instalación" : missingRequired.length > 0 ? "Instalar y continuar" : "Instalar SHAZAM"}</button>}
       {status.ready && onContinue && <button type="button" className="download-button" disabled={busy} onClick={onContinue}>Empezar a usar AntiTube →</button>}
-      {status.ready && managedYtDlp && <button type="button" className="setup-secondary" disabled={busy || isUpdating} onClick={() => void updateYtDlp()}>{isUpdating ? "Buscando actualización…" : "Actualizar yt-dlp"}</button>}
+      {status.ready && <button type="button" className="setup-secondary" disabled={busy || isChecking} onClick={() => void checkForUpdates()}>{isChecking ? "Buscando actualizaciones…" : "Buscar actualizaciones"}</button>}
+      {status.ready && pendingUpdates.length > 1 && <button type="button" className="setup-secondary is-accent" disabled={busy} onClick={() => void applyAll()}>Actualizar todo ({pendingUpdates.length})</button>}
       <button type="button" className="setup-secondary" disabled={busy} onClick={() => void post("/api/setup/check")}>Volver a comprobar</button>
     </div>
+    {checkedAt > 0 && <p className="setup-footnote">Última comprobación: {new Date(checkedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}</p>}
     <p className="setup-footnote">Carpeta de herramientas: <code>{status.toolsDirectory}</code></p>
   </div>;
 }

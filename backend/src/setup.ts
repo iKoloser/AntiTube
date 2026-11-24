@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream, existsSync } from "node:fs";
-import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -151,13 +151,6 @@ async function installYtDlp(): Promise<void> {
   if (!(await detectYtDlp())) throw new Error("yt-dlp se descargó pero no se pudo ejecutar.");
 }
 
-export async function updateYtDlp(): Promise<string> {
-  const binary = process.env.YTDLP_BIN ?? exe("yt-dlp");
-  if (steps.ytdlp.source !== "managed") return "yt-dlp lo gestiona el sistema; actualízalo con tu gestor de paquetes.";
-  const { stdout } = await execFileAsync(binary, ["-U"], { timeout: 120_000, windowsHide: true });
-  await detectYtDlp();
-  return stdout.trim().split(/\r?\n/).at(-1) ?? "yt-dlp actualizado.";
-}
 
 // ---------- FFmpeg ----------
 
@@ -306,7 +299,7 @@ async function installEmbeddedPython(): Promise<string> {
   return managedPython();
 }
 
-function runLogged(binary: string, args: string[]): Promise<void> {
+function runLogged(binary: string, args: string[], id: SetupStepId = "shazam"): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const child = spawn(binary, args, { windowsHide: true });
     let tail = "";
@@ -314,13 +307,13 @@ function runLogged(binary: string, args: string[]): Promise<void> {
       const lines = chunk.toString().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
       if (lines.length > 0) {
         tail = lines.at(-1) ?? tail;
-        update("shazam", { detail: tail.length > 90 ? `${tail.slice(0, 90)}…` : tail });
+        update(id, { detail: tail.length > 90 ? `${tail.slice(0, 90)}…` : tail });
       }
     };
     child.stdout.on("data", consume);
     child.stderr.on("data", consume);
     child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`Python terminó con error: ${tail}`))));
+    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`El proceso terminó con error: ${tail}`))));
   });
 }
 
@@ -368,10 +361,139 @@ async function downloadFile(url: string, destination: string, onProgress: (perce
 
 // ---------- API pública ----------
 
+// ---------- actualizaciones ----------
+
+export type UpdateInfo = { latest: string | null; available: boolean; canUpdate: boolean; note: string; checkedAt: number };
+const updates: Partial<Record<SetupStepId, UpdateInfo>> = {};
+let checkingUpdates = false;
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url, { headers: { "User-Agent": "AntiTube-desktop", Accept: "application/json" } });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return await response.json() as T;
+}
+
+function shortDate(value: string | number | Date): string {
+  return new Date(value).toLocaleDateString("es-ES", { day: "2-digit", month: "short", year: "numeric" });
+}
+
+// Compara versiones tipo 2025.01.15 / 2025.1.15 ignorando ceros a la izquierda.
+function sameVersion(left: string, right: string): boolean {
+  const parts = (value: string) => value.trim().split(/[.\-+]/).map((part) => (/^\d+$/.test(part) ? String(Number(part)) : part)).join(".");
+  return parts(left) === parts(right);
+}
+
+async function checkYtDlpUpdate(): Promise<UpdateInfo> {
+  // PyPI publica cada versión de yt-dlp y no tiene el límite de peticiones de la API de GitHub.
+  const pypi = await fetchJson<{ info: { version: string } }>("https://pypi.org/pypi/yt-dlp/json");
+  const latest = pypi.info.version;
+  const current = steps.ytdlp.version;
+  const available = current !== null && !sameVersion(latest, current);
+  const canUpdate = steps.ytdlp.source === "managed";
+  return {
+    latest,
+    available,
+    canUpdate,
+    note: !available ? `yt-dlp ${current ?? latest}: última versión` : canUpdate ? `Nueva versión ${latest} (tienes ${current})` : `Hay ${latest}; actualízalo con tu gestor de paquetes`,
+    checkedAt: Date.now()
+  };
+}
+
+async function checkFfmpegUpdate(): Promise<UpdateInfo> {
+  const download = ffmpegDownload();
+  if (steps.ffmpeg.source !== "managed" || !download) {
+    return { latest: null, available: false, canUpdate: false, note: "FFmpeg del sistema: se actualiza fuera de AntiTube", checkedAt: Date.now() };
+  }
+  const response = await fetch(download.url, { method: "HEAD", redirect: "follow", headers: { "User-Agent": "AntiTube-desktop" } });
+  const lastModified = response.headers.get("last-modified");
+  if (!response.ok || !lastModified) return { latest: null, available: false, canUpdate: true, note: "No se pudo consultar la última compilación", checkedAt: Date.now() };
+  const installedAt = (await stat(managedFfmpeg())).mtimeMs;
+  const publishedAt = Date.parse(lastModified);
+  // FFmpeg-Builds publica compilaciones casi a diario: solo avisamos si la instalada tiene más de una semana.
+  const available = publishedAt - installedAt > 7 * 24 * 60 * 60 * 1000;
+  return {
+    latest: shortDate(publishedAt),
+    available,
+    canUpdate: true,
+    note: available ? `Compilación del ${shortDate(publishedAt)} disponible (la tuya es del ${shortDate(installedAt)})` : `Compilación reciente (${shortDate(installedAt)})`,
+    checkedAt: Date.now()
+  };
+}
+
+async function checkShazamUpdate(): Promise<UpdateInfo> {
+  const python = process.env.PYTHON_BIN;
+  if (steps.shazam.status !== "done" || !python) return { latest: null, available: false, canUpdate: false, note: "SHAZAM no está instalado", checkedAt: Date.now() };
+  const [pypi, current] = await Promise.all([
+    fetchJson<{ info: { version: string } }>("https://pypi.org/pypi/shazamio/json"),
+    versionOf(python, ["-c", "import importlib.metadata as m; print(m.version('shazamio'))"])
+  ]);
+  const latest = pypi.info.version;
+  const available = current !== null && current.trim() !== latest;
+  return { latest, available, canUpdate: true, note: available ? `ShazamIO ${latest} disponible (tienes ${current})` : `ShazamIO ${current ?? latest}: última versión`, checkedAt: Date.now() };
+}
+
+export async function checkUpdates(): Promise<void> {
+  if (checkingUpdates || running) return;
+  checkingUpdates = true;
+  try {
+    const checks: Array<[SetupStepId, () => Promise<UpdateInfo>]> = [["ytdlp", checkYtDlpUpdate], ["ffmpeg", checkFfmpegUpdate], ["shazam", checkShazamUpdate]];
+    await Promise.all(checks.map(async ([id, check]) => {
+      if (steps[id].status !== "done" && id !== "shazam") return;
+      try {
+        updates[id] = await check();
+      } catch (error) {
+        updates[id] = { latest: null, available: false, canUpdate: false, note: `No se pudo comprobar (${error instanceof Error ? error.message : "sin conexión"})`, checkedAt: Date.now() };
+      }
+    }));
+    updates.engine = { latest: null, available: false, canUpdate: false, note: "Se actualiza junto con AntiTube", checkedAt: Date.now() };
+  } finally {
+    checkingUpdates = false;
+  }
+}
+
+/** Aplica la actualización de una herramienta. Devuelve false si ya hay trabajo en curso. */
+export function runUpdate(id: SetupStepId): boolean {
+  if (running || !["ytdlp", "ffmpeg", "shazam"].includes(id)) return false;
+  running = true;
+  lastError = null;
+  void (async () => {
+    try {
+      if (id === "ytdlp") {
+        if (steps.ytdlp.source !== "managed") throw new Error("yt-dlp es del sistema; actualízalo con tu gestor de paquetes.");
+        update("ytdlp", { status: "running", detail: "Actualizando yt-dlp…", percent: null });
+        await runLogged(managedYtDlp(), ["-U"], "ytdlp");
+        await detectYtDlp();
+      } else if (id === "ffmpeg") {
+        await installFfmpeg();
+      } else {
+        const python = process.env.PYTHON_BIN;
+        if (!python) throw new Error("SHAZAM no está instalado.");
+        update("shazam", { status: "running", detail: "Actualizando ShazamIO…", percent: null });
+        const managed = python === managedPython();
+        await runLogged(python, ["-m", "pip", "install", "--upgrade", ...(managed ? [] : ["--user"]), "--disable-pip-version-check", "--no-warn-script-location", "shazamio"]);
+        await detectShazam();
+      }
+      delete updates[id];
+      running = false;
+      await checkUpdates();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Error inesperado.";
+      // Si la actualización falla, la versión anterior sigue instalada: volvemos a detectarla.
+      if (id === "ytdlp") await detectYtDlp();
+      else if (id === "ffmpeg") await detectFfmpeg();
+      else await detectShazam();
+      updates[id] = { latest: updates[id]?.latest ?? null, available: true, canUpdate: true, note: `No se pudo actualizar: ${message}`, checkedAt: Date.now() };
+    } finally {
+      running = false;
+    }
+  })();
+  return true;
+}
+
 export function setupStatus() {
-  const list = [steps.engine, steps.ytdlp, steps.ffmpeg, steps.shazam];
+  const list = [steps.engine, steps.ytdlp, steps.ffmpeg, steps.shazam].map((step) => ({ ...step, update: updates[step.id] ?? null }));
   const ready = steps.ytdlp.status === "done" && steps.ffmpeg.status === "done";
-  return { ready, running, error: lastError, platform: process.platform, toolsDirectory: toolsDirectory(), steps: list };
+  return { ready, running, checkingUpdates, error: lastError, platform: process.platform, toolsDirectory: toolsDirectory(), steps: list };
 }
 
 export async function detectTools(): Promise<void> {
