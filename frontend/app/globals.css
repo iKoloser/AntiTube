@@ -2650,3 +2650,45 @@ footer > span:first-child {
   .job-item-bar { display: none; }
   .shazam-history-tools input { width: 100%; }
 }
+
+/* Actualización de la propia app */
+.app-update {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+}
+.app-update.is-available { border-color: var(--border-strong); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent), 0 18px 50px -30px var(--accent); }
+.app-update-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+.app-update-head h2 { margin: 4px 0; color: var(--fg-primary); font-size: 20px; }
+.app-update-head .setup-muted { margin: 0; }
+.app-update-head strong { color: var(--fg-primary); font-family: var(--font-mono); }
+.app-update-version { padding: 4px 10px; border: 1px solid var(--border-strong); border-radius: 999px; color: var(--accent); font-family: var(--font-mono); font-size: 12px; }
+.app-update-notes { padding: var(--space-3) var(--space-4); border-left: 2px solid var(--accent); border-radius: 0 8px 8px 0; background: var(--bg-base); }
+.app-update-notes strong { color: var(--fg-primary); font-size: 12.5px; }
+.app-update-notes ul { display: grid; gap: 4px; margin: 6px 0 0; padding-left: 18px; color: var(--fg-secondary); font-size: 12.5px; }
+.app-update-progress { display: grid; gap: 6px; color: var(--fg-secondary); font-family: var(--font-mono); font-size: 11.5px; }
+a.setup-secondary { display: inline-flex; align-items: center; text-decoration: none; }
+.app-update-banner {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 12px 10px 16px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  box-shadow: 0 18px 40px -20px #000;
+  color: var(--fg-secondary);
+  font-size: 13px;
+  backdrop-filter: blur(8px);
+  animation: setup-rise 260ms ease both;
+}
+.app-update-banner strong { color: var(--fg-primary); }
+.app-update-banner a { padding: 5px 12px; border-radius: 999px; background: var(--accent); color: var(--fg-inverse); font-size: 12px; font-weight: 600; text-decoration: none; }
+.app-update-banner button { border: 0; background: none; color: var(--fg-muted); font-size: 16px; cursor: pointer; }

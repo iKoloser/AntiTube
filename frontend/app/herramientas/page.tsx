@@ -1,6 +1,7 @@
 "use client";
 
 import AntiTubeLogo from "../AntiTubeLogo";
+import AppUpdatePanel from "../desktop/AppUpdate";
 import SetupPanel from "../desktop/SetupPanel";
 import DownloadsLink from "../DownloadsLink";
 import LogoutButton from "../LogoutButton";
@@ -13,6 +14,7 @@ export default function ToolsPage() {
     <main className="shell tools-shell">
       {isDesktop
         ? <>
+            <AppUpdatePanel />
             <DownloadFolder />
             <SetupPanel compact />
           </>

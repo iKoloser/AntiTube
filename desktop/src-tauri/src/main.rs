@@ -58,6 +58,7 @@ fn spawn_backend(app: &tauri::App, port: u16) -> Result<Child, Box<dyn std::erro
         .arg(backend_dir.join("server.cjs"))
         .current_dir(&backend_dir)
         .env("ANTITUBE_DESKTOP", "1")
+        .env("ANTITUBE_APP_VERSION", app.package_info().version.to_string())
         .env("NODE_ENV", "production")
         .env("BACKEND_PORT", port.to_string())
         .env("ANTITUBE_DATA_DIR", &data_dir)
@@ -100,10 +101,32 @@ document.addEventListener("click", (event) => {
 }, true);
 "#;
 
+/// Ejecuta el instalador de una actualización ya descargada por el backend y
+/// cierra la app. El instalador NSIS de Tauri, con `/P` (modo pasivo) y `/R`,
+/// instala sin preguntas y vuelve a abrir AntiTube al terminar.
+#[tauri::command]
+fn install_update(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    let invalid = || "El instalador descargado no es válido.".to_string();
+    let file = dunce::canonicalize(PathBuf::from(&path)).map_err(|_| invalid())?;
+    let folder = dunce::canonicalize(std::env::temp_dir().join("AntiTube-update")).map_err(|_| invalid())?;
+    let name = file.file_name().and_then(|name| name.to_str()).unwrap_or_default();
+    let valid_name = name.starts_with("AntiTube_") && name.to_ascii_lowercase().ends_with("_x64-setup.exe");
+    if !valid_name || file.parent() != Some(folder.as_path()) || !file.is_file() {
+        return Err(invalid());
+    }
+    Command::new(&file)
+        .args(["/P", "/R"])
+        .spawn()
+        .map_err(|error| format!("No se pudo abrir el instalador: {error}"))?;
+    app.exit(0);
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![install_update])
         .setup(|app| {
             let port = free_port();
             let child = spawn_backend(app, port)?;

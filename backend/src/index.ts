@@ -8,6 +8,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { ExtractorLookupError, ExtractorUnavailableError, getMediaMetadata } from "./extractor.js";
+import { createAppUpdateRouter } from "./appUpdate.js";
 import { createJobsRouter } from "./jobs.js";
 import { defaultDownloadDirectory, downloadDirectory, loadSettings, setDownloadDirectory } from "./settings.js";
 import { addToHistory, listHistory, removeFromHistory } from "./shazamHistory.js";
@@ -394,6 +395,7 @@ app.post("/api/analyze", (request: Request, response: Response) => {
 });
 
 app.use(createJobsRouter({ analyzeDownloadSource, maxPlaylistItems }));
+app.use(createAppUpdateRouter());
 
 app.get("/api/settings", (_request: Request, response: Response) => {
   response.json({ downloadDirectory: downloadDirectory(), defaultDownloadDirectory: defaultDownloadDirectory() });

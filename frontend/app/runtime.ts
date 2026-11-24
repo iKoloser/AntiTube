@@ -30,3 +30,10 @@ export async function pickFolder(defaultPath?: string): Promise<string | null | 
   const result = await internals.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Elige la carpeta de descargas", defaultPath } });
   return typeof result === "string" ? result : null;
 }
+
+/** Ejecuta el instalador de una actualización descargada y cierra la app (solo escritorio). */
+export async function installUpdate(path: string): Promise<void> {
+  const internals = (window as unknown as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
+  if (!internals?.invoke) throw new Error("La actualización automática solo funciona en la app de escritorio.");
+  await internals.invoke("install_update", { path });
+}

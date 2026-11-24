@@ -53,6 +53,25 @@ jobs:
           $version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
           "value=$version" >> $env:GITHUB_OUTPUT
 
+      # Las notas incluyen el mensaje del último commit: la app las muestra al ofrecer la actualización.
+      - name: Preparar notas de la release
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          {
+            echo "## Novedades"
+            echo
+            git log -1 --format=%B | grep -v -e '^Co-Authored-By:' -e '^Claude-Session:' | sed '/^$/N;/^\n$/D'
+            echo
+            echo "## Instalación"
+            echo
+            echo "1. Descarga \`AntiTube_${{ steps.version.outputs.value }}_x64-setup.exe\` y ejecútalo. No necesita permisos de administrador."
+            echo "2. Si ya tienes AntiTube, puedes actualizar desde la propia app: Herramientas › Actualizar AntiTube."
+            echo "3. Al abrir la app por primera vez, el asistente descarga yt-dlp y FFmpeg."
+            echo
+            echo "Windows puede avisar con SmartScreen porque el instalador no está firmado: pulsa «Más información» › «Ejecutar de todas formas»."
+          } > release-notes.md
+
       # Cada push a la rama desktop publica (o actualiza) la release desktop-v<versión>.
       - name: Publicar release
         if: github.event_name == 'push'
@@ -64,11 +83,4 @@ jobs:
           files: desktop/src-tauri/target/release/bundle/nsis/*.exe
           prerelease: true
           generate_release_notes: true
-          body: |
-            Instalador de Windows de AntiTube para escritorio (Tauri 2).
-
-            1. Descarga `AntiTube_${{ steps.version.outputs.value }}_x64-setup.exe` y ejecútalo. No necesita permisos de administrador.
-            2. Al abrir la app por primera vez, el asistente descarga yt-dlp y FFmpeg.
-            3. Las descargas se guardan en Descargas › AntiTube.
-
-            Windows puede avisar con SmartScreen porque el instalador no está firmado: pulsa «Más información» › «Ejecutar de todas formas».
+          body_path: release-notes.md

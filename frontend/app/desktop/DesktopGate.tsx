@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { AppUpdateBanner } from "./AppUpdate";
 import AntiTubeLogo from "../AntiTubeLogo";
 import { apiUrl } from "../runtime";
 import SetupPanel, { SetupSteps, type SetupStatus, type SetupStep } from "./SetupPanel";
@@ -70,7 +71,7 @@ export default function DesktopGate({ children }: Readonly<{ children: React.Rea
     return () => { cancelled = true; };
   }, [phase]);
 
-  if (phase === "ready") return <>{children}</>;
+  if (phase === "ready") return <>{children}<AppUpdateBanner /></>;
   if (phase === "init") return null;
 
   return <main className="desktop-gate">
