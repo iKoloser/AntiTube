@@ -1,6 +1,6 @@
 [package]
 name = "antitube"
-version = "0.1.5"
+version = "0.2.0"
 description = "AntiTube para escritorio"
 edition = "2021"
 
@@ -10,6 +10,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 dunce = "1"
 
 [profile.release]

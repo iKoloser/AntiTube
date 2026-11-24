@@ -20,3 +20,13 @@ export function apiUrl(): string {
 export async function revealDownload(filename?: string): Promise<void> {
   await fetch(`${apiUrl()}/api/desktop/open`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ filename }) });
 }
+
+type TauriInternals = { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> };
+
+/** Abre el selector de carpetas nativo (solo en la app de escritorio). Devuelve null si se cancela. */
+export async function pickFolder(defaultPath?: string): Promise<string | null | undefined> {
+  const internals = (window as unknown as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
+  if (!internals?.invoke) return undefined;
+  const result = await internals.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Elige la carpeta de descargas", defaultPath } });
+  return typeof result === "string" ? result : null;
+}

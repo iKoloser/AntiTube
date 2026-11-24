@@ -103,6 +103,7 @@ document.addEventListener("click", (event) => {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let port = free_port();
             let child = spawn_backend(app, port)?;

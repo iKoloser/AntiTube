@@ -4,7 +4,8 @@ import AntiTubeLogo from "../AntiTubeLogo";
 import SetupPanel from "../desktop/SetupPanel";
 import DownloadsLink from "../DownloadsLink";
 import LogoutButton from "../LogoutButton";
-import { isDesktop, revealDownload } from "../runtime";
+import { isDesktop } from "../runtime";
+import DownloadFolder from "./DownloadFolder";
 
 export default function ToolsPage() {
   return <>
@@ -12,8 +13,8 @@ export default function ToolsPage() {
     <main className="shell tools-shell">
       {isDesktop
         ? <>
+            <DownloadFolder />
             <SetupPanel compact />
-            <div className="tools-folder"><div><strong>Tus descargas</strong><p>Se guardan en la carpeta Descargas › AntiTube.</p></div><button type="button" className="setup-secondary" onClick={() => void revealDownload()}>Abrir carpeta</button></div>
           </>
         : <div className="notice">Esta página solo está disponible en la versión de escritorio.</div>}
     </main>

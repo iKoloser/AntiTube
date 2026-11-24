@@ -13,7 +13,10 @@ export type JobSummary = {
   isPlaylist: boolean;
   createdAt: number;
   finishedAt: number | null;
-  status: "queued" | "downloading" | "completed" | "failed";
+  status: "queued" | "downloading" | "paused" | "completed" | "failed" | "cancelled";
+  items: Array<{ index: number; title: string | null; percent: number; status: "downloading" | "done" | "skipped" }>;
+  skipped: number;
+  playlistItems: number[] | null;
   queuePosition: number | null;
   progress: { percent: number; speed: string | null; eta: string | null; current: number | null; total: number | null; message: string };
   lastLog: string | null;
