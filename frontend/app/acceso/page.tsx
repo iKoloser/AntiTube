@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import AntiTubeLogo from "../AntiTubeLogo";
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 export default function AccessPage() {
   const [key, setKey] = useState("");

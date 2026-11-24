@@ -8,6 +8,7 @@ RUN pnpm install --frozen-lockfile
 COPY frontend frontend
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV BACKEND_INTERNAL_URL=http://backend:4000
 RUN pnpm --filter @antitube/frontend build
 
 FROM node:24-alpine

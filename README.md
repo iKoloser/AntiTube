@@ -159,6 +159,25 @@ docker compose up --build
 
 Docker compila ambos paquetes y publica los mismos puertos locales: `3000` para el frontend y `4000` para el backend. Para detenerlos, usa `Ctrl+C`.
 
+## Versión web alojada sin EXE ni clave
+
+La rama `codex/hosted-public` incluye una variante ligera para alojarla en un VPS
+con Docker. Los usuarios acceden mediante una URL, sin descargar Electron y sin
+introducir una clave. El frontend hace proxy de `/api` al backend y las descargas
+se guardan en un volumen persistente.
+
+```bash
+docker compose -f docker-compose.hosted.yml up -d --build
+```
+
+Después se publica el puerto `3000` detrás de HTTPS mediante Nginx, Caddy o el
+proxy inverso del proveedor. Esta variante debe alojarse en un VPS o servidor
+Docker persistente; no es adecuada para plataformas serverless porque necesita
+`yt-dlp`, FFmpeg, procesos largos y almacenamiento local.
+
+El modo público no tiene autenticación, por lo que conviene añadir HTTPS y un
+límite de acceso en el proxy inverso antes de compartirlo públicamente.
+
 ## Comprobar la conexión frontend-backend
 
 Primero prueba la salud de la API:

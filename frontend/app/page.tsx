@@ -12,7 +12,7 @@ type DownloadJobResponse = { jobId: string; status: "queued" | "downloading" | "
 type VideoQuality = "best" | "360" | "480" | "720" | "1080";
 type AudioQuality = "128" | "192" | "256" | "320";
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 const supportedPlatforms = [
   { name: "YouTube", mark: "YT", detail: "vídeo, audio y playlists" },

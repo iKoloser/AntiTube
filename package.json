@@ -2,15 +2,65 @@
   "name": "antitube",
   "version": "0.1.0",
   "private": true,
+  "description": "Aplicación multimedia local AntiTube",
+  "author": "AntiTube",
+  "main": "desktop/main.cjs",
   "packageManager": "pnpm@10.15.1",
   "scripts": {
     "dev": "concurrently \"pnpm --filter frontend dev\" \"pnpm --filter backend dev\"",
     "build": "pnpm --filter backend build && pnpm --filter frontend build",
     "typecheck": "pnpm --filter backend typecheck && pnpm --filter frontend typecheck",
     "tools:check": "yt-dlp --version && ffmpeg -version",
-    "start": "concurrently \"pnpm --filter frontend start\" \"pnpm --filter backend start\""
+    "start": "concurrently \"pnpm --filter frontend start\" \"pnpm --filter backend start\"",
+    "desktop:dev": "pnpm build && pnpm desktop:bundle && electron desktop/main.cjs",
+    "desktop:bundle": "esbuild backend/src/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=desktop/runtime/backend.cjs",
+    "desktop:prepare": "node desktop/prepare-standalone.cjs",
+    "desktop:package": "pnpm build && pnpm desktop:bundle && pnpm desktop:prepare && electron-builder --win portable",
+    "desktop:package:installer": "pnpm build && pnpm desktop:bundle && pnpm desktop:prepare && electron-builder --win nsis"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.0.12",
+    "esbuild": "^0.27.0"
+  },
+  "build": {
+    "appId": "com.antitube.desktop",
+    "productName": "AntiTube",
+    "asar": false,
+    "compression": "maximum",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "!desktop/vendor{,/**/*}",
+      "backend/shazam_recognize.py",
+      "backend/requirements.txt",
+      "frontend/.next/standalone/**/*",
+      "frontend/.next/static/**/*",
+      "frontend/public/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "desktop/vendor",
+        "to": "vendor",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": ["portable", "nsis"],
+      "artifactName": "AntiTube-${version}-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "AntiTube-${version}-portable.exe"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "artifactName": "AntiTube-${version}-Setup.${ext}"
+    }
   }
 }

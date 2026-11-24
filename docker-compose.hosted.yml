@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    environment:
+      NODE_ENV: production
+      ANTITUBE_PUBLIC_MODE: "true"
+      BACKEND_PORT: 4000
+      CORS_ORIGIN: http://frontend:3000
+      DOWNLOAD_DIR: /data/downloads
+      MAX_DOWNLOAD_BYTES: 524288000
+      DOWNLOAD_TIMEOUT_MS: 1800000
+      METADATA_TIMEOUT_MS: 60000
+      PLAYLIST_METADATA_TIMEOUT_MS: 180000
+      MAX_PLAYLIST_ITEMS: 50
+    volumes:
+      - antitube-downloads:/data/downloads
+    expose:
+      - "4000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: /api
+      BACKEND_INTERNAL_URL: http://backend:4000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  antitube-downloads:

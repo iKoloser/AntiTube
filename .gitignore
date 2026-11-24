@@ -1,5 +1,8 @@
 # Dependencias y compilados
 node_modules/
+release/
+desktop/vendor/*
+!desktop/vendor/.gitkeep
 **/node_modules/
 .next/
 dist/

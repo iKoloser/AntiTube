@@ -15,6 +15,7 @@ dotenv.config();
 
 const app = express();
 const execFileAsync = promisify(execFile);
+const backendRoot = process.env.ANTITUBE_BACKEND_ROOT ?? path.resolve(__dirname, "..");
 const port = Number(process.env.BACKEND_PORT ?? 4000);
 const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:3000";
 const metadataTimeoutMs = Number(process.env.METADATA_TIMEOUT_MS ?? 60_000);
@@ -23,11 +24,13 @@ const maxPlaylistItems = Number(process.env.MAX_PLAYLIST_ITEMS ?? 50);
 const shazamTimeoutMs = Number(process.env.SHAZAM_TIMEOUT_MS ?? 60_000);
 const ffmpegTimeoutMs = Number(process.env.FFMPEG_TIMEOUT_MS ?? 30_000);
 const accessKey = process.env.ANTITUBE_ACCESS_KEY?.trim() ?? "";
+const publicMode = process.env.ANTITUBE_PUBLIC_MODE === "true";
+const localMode = publicMode || process.env.ANTITUBE_LOCAL_MODE === "true";
 const sessionCookieName = "antitube_session";
 const authRateLimitMax = Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10);
 const authRateLimitWindowMs = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000);
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
-const downloadDirectory = path.resolve(process.cwd(), process.env.DOWNLOAD_DIR ?? "../downloads");
+const downloadDirectory = path.resolve(process.env.DOWNLOAD_DIR ?? path.join(backendRoot, "..", "downloads"));
 let activeDownloads = 0;
 
 type DownloadJob = {
@@ -54,6 +57,7 @@ function sessionToken(): string {
 }
 
 function hasValidSession(request: Request): boolean {
+  if (localMode) return true;
   if (!accessKey) return false;
   const received = parseCookies(request)[sessionCookieName] ?? "";
   const expected = sessionToken();
@@ -143,6 +147,10 @@ function analyzeDownloadSource(value: unknown): Analysis | null {
 }
 
 app.post("/api/auth/login", (request: Request, response: Response) => {
+  if (localMode) {
+    response.json({ authenticated: true });
+    return;
+  }
   if (!accessKey) {
     response.status(503).json({ error: "Autenticación no configurada", message: "Define ANTITUBE_ACCESS_KEY en el archivo .env del backend." });
     return;
@@ -205,7 +213,7 @@ app.post("/api/shazam/recognize", async (request: Request, response: Response) =
     return;
   }
 
-  const temporaryDirectory = path.resolve(process.cwd(), "../downloads/.shazam-temp");
+  const temporaryDirectory = path.join(downloadDirectory, ".shazam-temp");
   const temporaryPath = path.join(temporaryDirectory, `${randomUUID()}${audioExtension(request.body?.mimeType)}`);
   let normalizedPath: string | null = null;
   const pythonBinary = process.env.PYTHON_BIN ?? "python";
@@ -226,7 +234,7 @@ app.post("/api/shazam/recognize", async (request: Request, response: Response) =
       "-c:a", "pcm_s16le",
       normalizedPath
     ], { timeout: ffmpegTimeoutMs, maxBuffer: 2 * 1024 * 1024 });
-    const scriptPath = path.resolve(process.cwd(), "shazam_recognize.py");
+    const scriptPath = path.join(backendRoot, "shazam_recognize.py");
     const { stdout } = await execFileAsync(pythonBinary, [scriptPath, normalizedPath], {
       timeout: shazamTimeoutMs,
       maxBuffer: 2 * 1024 * 1024
