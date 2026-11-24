@@ -359,7 +359,7 @@ app.post("/api/shazam/recognize", async (request: Request, response: Response) =
     if (errorCode === "ENOENT" && detail.includes(ffmpegBinary)) {
       response.status(503).json({ error: "FFmpeg no disponible", message: `No se ha encontrado FFmpeg (${detail}). Instálalo o configura FFMPEG_BIN.` });
     } else if (detail.includes("No module named") || (errorCode === "ENOENT" && detail.includes(pythonBinary))) {
-      response.status(503).json({ error: "ShazamIO no disponible", message: `Instala la dependencia con: python -m pip install -r backend/requirements.txt (${detail})` });
+      response.status(503).json({ error: "ShazamIO no disponible", message: desktopMode ? "SHAZAM no está instalado. Ve a Herramientas, marca «Instalar también SHAZAM» y pulsa «Instalar SHAZAM»." : `Instala la dependencia con: python -m pip install -r backend/requirements.txt (${detail})` });
     } else {
       response.status(422).json({ error: "No se pudo reconocer el audio", message: detail });
     }

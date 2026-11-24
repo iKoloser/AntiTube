@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
 import { createWriteStream, existsSync } from "node:fs";
-import { chmod, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -80,7 +80,7 @@ const steps: Record<SetupStepId, SetupStep> = {
   shazam: {
     id: "shazam",
     title: "Reconocimiento SHAZAM",
-    description: "Opcional. Necesita Python 3.10 o posterior instalado en el equipo.",
+    description: isWindows ? "Opcional. Reconoce canciones; instala un Python privado con ShazamIO (unos 30 MB)." : "Opcional. Necesita Python 3.10 o posterior instalado en el equipo.",
     optional: true,
     status: "pending",
     detail: "Sin comprobar",
@@ -238,9 +238,18 @@ async function installFfmpeg(): Promise<void> {
 
 // ---------- Python + ShazamIO ----------
 
+// Python "embeddable" oficial: un zip autocontenido que no toca el sistema ni el PATH.
+const embeddedPythonVersion = "3.12.10";
+
+function managedPython(): string {
+  return path.join(toolsDirectory(), "python", "python.exe");
+}
+
 async function pythonCandidates(): Promise<string[]> {
   const configured = process.env.PYTHON_BIN?.trim();
-  const list = configured ? [configured] : [];
+  const list: string[] = [];
+  if (isWindows && existsSync(managedPython())) list.push(managedPython());
+  if (configured) list.push(configured);
   list.push(...(isWindows ? ["python", "py"] : ["python3", "python"]));
   return [...new Set(list)];
 }
@@ -251,24 +260,55 @@ async function detectShazam(): Promise<boolean> {
     const version = await versionOf(python, ["--version"], /Python (\S+)/);
     if (!version) continue;
     process.env.PYTHON_BIN = python;
+    const source: SetupStep["source"] = python === managedPython() ? "managed" : "system";
     const hasShazam = await versionOf(python, ["-c", "import shazamio; print('ok')"]);
     if (hasShazam === "ok") {
-      update("shazam", { status: "done", version: `Python ${version}`, source: "system", detail: "Listo para reconocer canciones" });
+      update("shazam", { status: "done", version: `Python ${version}`, source, detail: "Listo para reconocer canciones" });
       return true;
     }
-    update("shazam", { status: "pending", version: `Python ${version}`, source: "system", detail: "Python encontrado. Falta instalar ShazamIO." });
+    update("shazam", { status: "pending", version: `Python ${version}`, source, detail: "Python encontrado. Falta instalar ShazamIO." });
     return false;
   }
-  update("shazam", { status: "skipped", version: null, source: null, detail: "Python no está instalado. SHAZAM quedará desactivado; el resto funciona igual." });
+  delete process.env.PYTHON_BIN;
+  if (isWindows && process.arch === "x64") {
+    update("shazam", { status: "pending", version: null, source: null, detail: "Python no está instalado. Se descargará uno privado para AntiTube." });
+  } else {
+    update("shazam", { status: "skipped", version: null, source: null, detail: "Python no está instalado. SHAZAM quedará desactivado; el resto funciona igual." });
+  }
   return false;
 }
 
-async function installShazam(): Promise<void> {
-  const python = process.env.PYTHON_BIN;
-  if (!python || steps.shazam.status === "skipped") throw new Error("Instala Python 3.10 o posterior desde python.org y vuelve a comprobar.");
-  update("shazam", { status: "running", detail: "Instalando ShazamIO con pip…", percent: null });
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(python, ["-m", "pip", "install", "--user", "--disable-pip-version-check", "shazamio==0.9.0"], { windowsHide: true });
+async function installEmbeddedPython(): Promise<string> {
+  const directory = path.dirname(managedPython());
+  const archivePath = path.join(toolsDirectory(), ".python-embed.zip");
+  await rm(directory, { recursive: true, force: true });
+  await mkdir(directory, { recursive: true });
+  try {
+    update("shazam", { status: "running", detail: `Descargando Python ${embeddedPythonVersion}…`, percent: 0 });
+    await downloadFile(`https://www.python.org/ftp/python/${embeddedPythonVersion}/python-${embeddedPythonVersion}-embed-amd64.zip`, archivePath, (percent, label) => update("shazam", { percent, detail: `Descargando Python… ${label}` }));
+    update("shazam", { detail: "Descomprimiendo Python…", percent: null });
+    await execFileAsync("tar", ["-xf", archivePath, "-C", directory], { timeout: 120_000, windowsHide: true });
+  } finally {
+    await rm(archivePath, { force: true }).catch(() => undefined);
+  }
+  // La versión embebida ignora site-packages hasta que se activa `import site` en su ._pth.
+  const pthName = (await readdir(directory)).find((name) => name.endsWith("._pth"));
+  if (pthName) {
+    const pthPath = path.join(directory, pthName);
+    const content = await readFile(pthPath, "utf8");
+    await writeFile(pthPath, `${content.replace(/^#\s*import site/m, "import site").trimEnd()}\nLib\\site-packages\n`);
+  }
+  update("shazam", { detail: "Instalando pip…", percent: null });
+  const getPip = path.join(directory, "get-pip.py");
+  await downloadFile("https://bootstrap.pypa.io/get-pip.py", getPip, () => undefined);
+  await runLogged(managedPython(), [getPip, "--no-warn-script-location", "--disable-pip-version-check"]);
+  await rm(getPip, { force: true });
+  return managedPython();
+}
+
+function runLogged(binary: string, args: string[]): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(binary, args, { windowsHide: true });
     let tail = "";
     const consume = (chunk: Buffer) => {
       const lines = chunk.toString().split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -280,8 +320,20 @@ async function installShazam(): Promise<void> {
     child.stdout.on("data", consume);
     child.stderr.on("data", consume);
     child.on("error", reject);
-    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`pip terminó con error: ${tail}`))));
+    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`Python terminó con error: ${tail}`))));
   });
+}
+
+async function installShazam(): Promise<void> {
+  let python = process.env.PYTHON_BIN;
+  if (!python) {
+    if (!(isWindows && process.arch === "x64")) throw new Error("Instala Python 3.10 o posterior desde python.org y vuelve a comprobar.");
+    python = await installEmbeddedPython();
+  }
+  const managed = python === managedPython();
+  update("shazam", { status: "running", detail: "Instalando ShazamIO con pip…", percent: null });
+  // En el Python privado se instala dentro de su carpeta; en el del sistema, en el perfil del usuario.
+  await runLogged(python, ["-m", "pip", "install", ...(managed ? [] : ["--user"]), "--disable-pip-version-check", "--no-warn-script-location", "shazamio==0.9.0"]);
   if (!(await detectShazam())) throw new Error("ShazamIO se instaló pero Python no lo encuentra.");
 }
 

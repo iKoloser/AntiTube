@@ -144,9 +144,9 @@ export default function SetupPanel({ onContinue, compact = false }: Readonly<{ o
     <SetupSteps steps={status.steps} />
     {status.error && <div className="notice error" role="alert">ⓘ <span>{status.error}</span></div>}
     {notice && <div className="notice" role="status">{notice}</div>}
-    {shazamInstallable && <label className="setup-option"><input type="checkbox" checked={includeShazam} disabled={busy} onChange={(event) => setIncludeShazam(event.target.checked)} /><span>Instalar también ShazamIO para la pestaña SHAZAM <small>(usa tu Python)</small></span></label>}
+    {shazamInstallable && <label className="setup-option"><input type="checkbox" checked={includeShazam} disabled={busy} onChange={(event) => setIncludeShazam(event.target.checked)} /><span>Instalar también SHAZAM para reconocer canciones <small>({shazamStep?.version ? "usa tu Python" : "descarga un Python privado, unos 30 MB"})</small></span></label>}
     <div className="setup-actions">
-      {needsAction && <button type="button" className="download-button" disabled={busy} onClick={() => void install()}>{busy ? "Instalando…" : status.error ? "Reintentar instalación" : missingRequired.length > 0 ? "Instalar y continuar" : "Instalar ShazamIO"}</button>}
+      {needsAction && <button type="button" className="download-button" disabled={busy} onClick={() => void install()}>{busy ? "Instalando…" : status.error ? "Reintentar instalación" : missingRequired.length > 0 ? "Instalar y continuar" : "Instalar SHAZAM"}</button>}
       {status.ready && onContinue && <button type="button" className="download-button" disabled={busy} onClick={onContinue}>Empezar a usar AntiTube →</button>}
       {status.ready && managedYtDlp && <button type="button" className="setup-secondary" disabled={busy || isUpdating} onClick={() => void updateYtDlp()}>{isUpdating ? "Buscando actualización…" : "Actualizar yt-dlp"}</button>}
       <button type="button" className="setup-secondary" disabled={busy} onClick={() => void post("/api/setup/check")}>Volver a comprobar</button>
