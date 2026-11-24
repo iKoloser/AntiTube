@@ -33,14 +33,21 @@ fn node_binary(resource_dir: &Path) -> PathBuf {
     if bundled.exists() { bundled } else { PathBuf::from(name) }
 }
 
+/// En Windows, Tauri devuelve rutas con el prefijo `\\?\` (p. ej. `\\?\C:\Users\…`).
+/// Node no sabe resolverlas como script de entrada, así que las normalizamos.
+fn plain(path: PathBuf) -> PathBuf {
+    dunce::simplified(&path).to_path_buf()
+}
+
 fn spawn_backend(app: &tauri::App, port: u16) -> Result<Child, Box<dyn std::error::Error>> {
-    let resource_dir = app.path().resource_dir()?;
-    let data_dir = app.path().app_local_data_dir()?;
-    let download_dir = app
-        .path()
-        .download_dir()
-        .unwrap_or_else(|_| data_dir.join("downloads"))
-        .join("AntiTube");
+    let resource_dir = plain(app.path().resource_dir()?);
+    let data_dir = plain(app.path().app_local_data_dir()?);
+    let download_dir = plain(
+        app.path()
+            .download_dir()
+            .unwrap_or_else(|_| data_dir.join("downloads")),
+    )
+    .join("AntiTube");
     fs::create_dir_all(&data_dir)?;
 
     let backend_dir = resource_dir.join("backend");

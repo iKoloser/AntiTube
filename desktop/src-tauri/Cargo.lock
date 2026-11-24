@@ -43,8 +43,9 @@ dependencies = [
 
 [[package]]
 name = "antitube"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
+ "dunce",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

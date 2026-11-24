@@ -44,7 +44,7 @@ export default function DesktopGate({ children }: Readonly<{ children: React.Rea
           const response = await fetch(`${apiUrl()}/api/health`);
           if (response.ok) break;
         } catch { /* todavía arrancando */ }
-        if (Date.now() - startedAt > 45_000) { setEngine("error"); setDetail("El motor local no ha respondido. Cierra y vuelve a abrir AntiTube."); setPhase("failed"); return; }
+        if (Date.now() - startedAt > 45_000) { setEngine("error"); setDetail("El motor local no ha respondido. Cierra y vuelve a abrir AntiTube; si se repite, revisa backend.log en %LOCALAPPDATA%\\com.ikoloser.antitube."); setPhase("failed"); return; }
         setDetail(`Arrancando… ${Math.round((Date.now() - startedAt) / 1000)} s`);
         await new Promise((resolve) => setTimeout(resolve, 300));
       }
