@@ -9,14 +9,26 @@ import { promisify } from "node:util";
 import { createPlaylistArchive } from "./archive.js";
 import { DownloadLimitError, DownloadToolUnavailableError, downloadMedia, type AudioQuality, type DownloadFormat, type DownloadProgress, type VideoQuality } from "./downloader.js";
 import { ExtractorLookupError, ExtractorUnavailableError, getMediaMetadata } from "./extractor.js";
+import { detectTools, runSetup, setupStatus, updateYtDlp } from "./setup.js";
 
-dotenv.config({ path: "../.env" });
-dotenv.config();
+// En la versión de escritorio la configuración llega por variables de entorno
+// desde la app Tauri; no se leen archivos .env.
+const desktopMode = process.env.ANTITUBE_DESKTOP === "1";
+if (!desktopMode) {
+  dotenv.config({ path: "../.env" });
+  dotenv.config();
+} else if (!process.env.YTDLP_JS_RUNTIME) {
+  // yt-dlp necesita un runtime JavaScript para YouTube: reutilizamos el Node incluido en la app.
+  process.env.YTDLP_JS_RUNTIME = `node:${process.execPath}`;
+}
 
 const app = express();
 const execFileAsync = promisify(execFile);
 const port = Number(process.env.BACKEND_PORT ?? 4000);
 const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:3000";
+// Orígenes del WebView de Tauri (Windows usa http(s)://tauri.localhost; macOS/Linux, tauri://localhost).
+const desktopOrigins = ["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost", "http://localhost:3000"];
+const resourceDirectory = path.resolve(process.env.ANTITUBE_RESOURCE_DIR ?? process.cwd());
 const metadataTimeoutMs = Number(process.env.METADATA_TIMEOUT_MS ?? 60_000);
 const playlistMetadataTimeoutMs = Number(process.env.PLAYLIST_METADATA_TIMEOUT_MS ?? 180_000);
 const maxPlaylistItems = Number(process.env.MAX_PLAYLIST_ITEMS ?? 50);
@@ -40,7 +52,7 @@ type DownloadJob = {
 
 const downloadJobs = new Map<string, DownloadJob>();
 
-app.use(cors({ origin: corsOrigin, credentials: true }));
+app.use(cors({ origin: desktopMode ? desktopOrigins : corsOrigin, credentials: true }));
 app.use(express.json({ limit: "20mb" }));
 app.set("trust proxy", process.env.NODE_ENV === "production");
 
@@ -67,6 +79,11 @@ function setSessionCookie(response: Response, token: string, maxAgeSeconds: numb
 }
 
 app.use("/api", (request: Request, response: Response, next) => {
+  // La app de escritorio solo escucha en 127.0.0.1 y no necesita clave.
+  if (desktopMode) {
+    next();
+    return;
+  }
   const publicRoute = (request.method === "POST" && request.path === "/auth/login")
     || (request.method === "GET" && request.path === "/auth/session")
     || (request.method === "GET" && request.path === "/health");
@@ -171,7 +188,7 @@ app.post("/api/auth/login", (request: Request, response: Response) => {
 });
 
 app.get("/api/auth/session", (request: Request, response: Response) => {
-  response.json({ authenticated: hasValidSession(request) });
+  response.json({ authenticated: desktopMode || hasValidSession(request) });
 });
 
 app.post("/api/auth/logout", (_request: Request, response: Response) => {
@@ -180,7 +197,53 @@ app.post("/api/auth/logout", (_request: Request, response: Response) => {
 });
 
 app.get("/api/health", (_request: Request, response: Response) => {
-  response.json({ status: "ok", service: "antitube-backend" });
+  response.json({ status: "ok", service: "antitube-backend", desktop: desktopMode });
+});
+
+app.get("/api/setup/status", (_request: Request, response: Response) => {
+  response.json(setupStatus());
+});
+
+app.post("/api/setup/check", async (_request: Request, response: Response) => {
+  await detectTools();
+  response.json(setupStatus());
+});
+
+app.post("/api/setup/install", (request: Request, response: Response) => {
+  const started = runSetup({ includeShazam: request.body?.includeShazam === true });
+  response.status(started ? 202 : 409).json(setupStatus());
+});
+
+app.post("/api/setup/update-ytdlp", async (_request: Request, response: Response) => {
+  try {
+    response.json({ message: await updateYtDlp(), status: setupStatus() });
+  } catch (error) {
+    response.status(500).json({ error: "No se pudo actualizar", message: error instanceof Error ? error.message : "Error inesperado." });
+  }
+});
+
+app.get("/api/desktop/info", (_request: Request, response: Response) => {
+  response.json({ desktop: desktopMode, downloadDirectory });
+});
+
+// Abre la carpeta de descargas (y selecciona el archivo si se indica) en el explorador del sistema.
+app.post("/api/desktop/open", (request: Request, response: Response) => {
+  if (!desktopMode) {
+    response.status(404).json({ error: "No disponible", message: "Solo disponible en la versión de escritorio." });
+    return;
+  }
+  const rawFilename = request.body?.filename;
+  const filename = typeof rawFilename === "string" ? path.basename(rawFilename) : "";
+  const target = filename ? path.join(downloadDirectory, filename) : downloadDirectory;
+  const [command, args] = process.platform === "win32"
+    ? ["explorer.exe", filename ? [`/select,${target}`] : [target]]
+    : process.platform === "darwin"
+      ? ["open", filename ? ["-R", target] : [target]]
+      : ["xdg-open", [downloadDirectory]];
+  void mkdir(downloadDirectory, { recursive: true }).then(() => {
+    execFile(command, args, { windowsHide: true }, () => undefined);
+  });
+  response.json({ opened: target });
 });
 
 function audioExtension(mimeType: unknown): string {
@@ -205,7 +268,7 @@ app.post("/api/shazam/recognize", async (request: Request, response: Response) =
     return;
   }
 
-  const temporaryDirectory = path.resolve(process.cwd(), "../downloads/.shazam-temp");
+  const temporaryDirectory = desktopMode ? path.join(process.env.ANTITUBE_DATA_DIR ?? downloadDirectory, ".shazam-temp") : path.resolve(process.cwd(), "../downloads/.shazam-temp");
   const temporaryPath = path.join(temporaryDirectory, `${randomUUID()}${audioExtension(request.body?.mimeType)}`);
   let normalizedPath: string | null = null;
   const pythonBinary = process.env.PYTHON_BIN ?? "python";
@@ -226,7 +289,7 @@ app.post("/api/shazam/recognize", async (request: Request, response: Response) =
       "-c:a", "pcm_s16le",
       normalizedPath
     ], { timeout: ffmpegTimeoutMs, maxBuffer: 2 * 1024 * 1024 });
-    const scriptPath = path.resolve(process.cwd(), "shazam_recognize.py");
+    const scriptPath = path.join(resourceDirectory, "shazam_recognize.py");
     const { stdout } = await execFileAsync(pythonBinary, [scriptPath, normalizedPath], {
       timeout: shazamTimeoutMs,
       maxBuffer: 2 * 1024 * 1024
@@ -429,6 +492,17 @@ app.get("/api/downloads/:filename", (request: Request, response: Response) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`AntiTube backend disponible en http://localhost:${port}`);
-});
+if (desktopMode) {
+  // La app Tauri mantiene abierta la entrada estándar; si se cierra, la app ha terminado.
+  process.stdin.on("end", () => process.exit(0));
+  process.stdin.on("error", () => process.exit(0));
+  process.stdin.resume();
+  void detectTools();
+  app.listen(port, "127.0.0.1", () => {
+    console.log(`ANTITUBE_READY http://127.0.0.1:${port}`);
+  });
+} else {
+  app.listen(port, () => {
+    console.log(`AntiTube backend disponible en http://localhost:${port}`);
+  });
+}

@@ -19,3 +19,9 @@ frontend/package-lock.json
 frontend - copia/
 .hallmark/
 run.txt
+
+# Versión de escritorio (generados por desktop/scripts/prepare.mjs y Tauri)
+frontend/out/
+desktop/src-tauri/resources/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/

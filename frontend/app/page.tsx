@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import AntiTubeLogo from "./AntiTubeLogo";
+import { apiUrl, isDesktop, revealDownload } from "./runtime";
 import LogoutButton from "./LogoutButton";
 
 type AnalysisResponse = { message: string; analysis: { url: string; domain: string; platform: string; videoOnly: boolean } };
@@ -12,7 +13,6 @@ type DownloadJobResponse = { jobId: string; status: "queued" | "downloading" | "
 type VideoQuality = "best" | "360" | "480" | "720" | "1080";
 type AudioQuality = "128" | "192" | "256" | "320";
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 const supportedPlatforms = [
   { name: "YouTube", mark: "YT", detail: "vídeo, audio y playlists" },
@@ -70,7 +70,7 @@ export default function Home() {
     setError(null);
     setIsMetadataLoading(true);
     try {
-      const response = await fetch(`${apiUrl}/api/metadata`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, playlist: playlistOverride }) });
+      const response = await fetch(`${apiUrl()}/api/metadata`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, playlist: playlistOverride }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message ?? "No se pudieron consultar los metadatos.");
       setMetadata(data as MetadataResponse);
@@ -82,7 +82,7 @@ export default function Home() {
     event.preventDefault(); setIsLoading(true); setError(null); setResult(null); setMetadata(null); setDownload(null); setDownloadLogs([]);
     try {
       const playlistDetected = looksLikePlaylist(url);
-      const response = await fetch(`${apiUrl}/api/analyze`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
+      const response = await fetch(`${apiUrl()}/api/analyze`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.message ?? "No se pudo analizar la URL.");
       const nextResult = data as AnalysisResponse;
@@ -96,13 +96,13 @@ export default function Home() {
   async function handleDownload() {
     setIsDownloadLoading(true); setError(null); setDownload(null); setDownloadProgress(null); setDownloadLogs([]);
     try {
-      const response = await fetch(`${apiUrl}/api/download`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, format, quality: format === "mp4" ? videoQuality : audioQuality, playlist, playlistTotal: metadata?.metadata.isPlaylist ? metadata.metadata.playlistCount : null, playlistTitle: metadata?.metadata.isPlaylist ? metadata.metadata.playlistTitle : null }) });
+      const response = await fetch(`${apiUrl()}/api/download`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url, format, quality: format === "mp4" ? videoQuality : audioQuality, playlist, playlistTotal: metadata?.metadata.isPlaylist ? metadata.metadata.playlistCount : null, playlistTitle: metadata?.metadata.isPlaylist ? metadata.metadata.playlistTitle : null }) });
       const data = await response.json() as DownloadJobResponse;
       if (!response.ok) throw new Error((data as unknown as { message?: string }).message ?? "No se pudo iniciar la descarga.");
       let job = data; setDownloadProgress(job.progress); setDownloadLogs(job.logs ?? []);
       while (job.status !== "completed" && job.status !== "failed") {
         await new Promise((resolve) => setTimeout(resolve, 700));
-        const progressResponse = await fetch(`${apiUrl}/api/download/${job.jobId}`, { credentials: "include" });
+        const progressResponse = await fetch(`${apiUrl()}/api/download/${job.jobId}`, { credentials: "include" });
         job = await progressResponse.json() as DownloadJobResponse;
         if (!progressResponse.ok) throw new Error(job.error?.message ?? "No se pudo consultar el progreso.");
         setDownloadProgress(job.progress); setDownloadLogs(job.logs ?? []);
@@ -110,9 +110,9 @@ export default function Home() {
       if (job.status === "failed" || !job.result) throw new Error(job.error?.message ?? "La descarga ha fallado.");
       setDownload({
         ...job.result,
-        files: job.result.files.map((file) => ({ ...file, downloadUrl: `${apiUrl}${file.downloadUrl}` })),
+        files: job.result.files.map((file) => ({ ...file, downloadUrl: `${apiUrl()}${file.downloadUrl}` })),
         archive: job.result.archive
-          ? { ...job.result.archive, downloadUrl: `${apiUrl}${job.result.archive.downloadUrl}` }
+          ? { ...job.result.archive, downloadUrl: `${apiUrl()}${job.result.archive.downloadUrl}` }
           : undefined
       });
     } catch (caughtError) { setError(caughtError instanceof Error ? caughtError.message : "Se produjo un error inesperado."); }
@@ -130,7 +130,7 @@ export default function Home() {
     : 0;
 
   return <>
-    <header className="site-header"><a className="brand" href="/" aria-label="AntiTube, inicio"><AntiTubeLogo /></a><nav className="site-nav" aria-label="Navegación principal"><a className="site-nav-link active" href="/">Descargar</a><a className="site-nav-link" href="/shazam">SHAZAM</a><LogoutButton /></nav></header>
+    <header className="site-header"><a className="brand" href="/" aria-label="AntiTube, inicio"><AntiTubeLogo /></a><nav className="site-nav" aria-label="Navegación principal"><a className="site-nav-link active" href="/">Descargar</a><a className="site-nav-link" href="/shazam/">SHAZAM</a><LogoutButton /></nav></header>
     <main className="shell">
       <form className="link-form" onSubmit={handleSubmit}><span className="link-symbol">↗</span><label className="sr-only" htmlFor="media-url">Enlace del vídeo o audio</label><input id="media-url" type="url" required value={url} onChange={(event) => setUrl(event.target.value)} placeholder="Pega aquí el enlace de tu vídeo o audio…" /><button disabled={isLoading}>{isLoading ? "Analizando…" : "Analizar enlace"}</button></form>
       <div className="form-note"><span>Conexión local. No se descarga nada al analizar.</span></div>
@@ -145,7 +145,7 @@ export default function Home() {
         <div className="options-panel"><div className="options-heading"><h3>Opciones de salida</h3><span>02 / Configuración</span></div><p className="options-sub">Selecciona formato, calidad y alcance.</p><div className="tabs"><button type="button" className={format === "mp4" ? "active" : ""} onClick={() => { setFormat("mp4"); setDownload(null); }}>▣ Vídeo</button>{!videoOnly && <button type="button" className={format === "mp3" ? "active" : ""} onClick={() => { setFormat("mp3"); setDownload(null); }}>♫ Solo audio</button>}</div>{videoOnly && <p className="format-note">{result.analysis.platform} se descarga solo como vídeo MP4.</p>}<div className="format-label"><label htmlFor="quality">Formato y calidad</label><span>Seleccionar</span></div><div className="select-wrap"><select id="quality" value={format === "mp4" ? videoQuality : audioQuality} onChange={(event) => format === "mp4" ? setVideoQuality(event.target.value as VideoQuality) : setAudioQuality(event.target.value as AudioQuality)}>{format === "mp4" ? <><option value="best">MP4: Mejor disponible</option><option value="1080">MP4: Hasta 1080p</option><option value="720">MP4: Hasta 720p</option><option value="480">MP4: Hasta 480p</option><option value="360">MP4: Hasta 360p</option></> : <><option value="320">MP3: 320 kbps</option><option value="256">MP3: 256 kbps</option><option value="192">MP3: 192 kbps</option><option value="128">MP3: 128 kbps</option></>}</select></div><div className="playlist-toggle"><input id="playlist" type="checkbox" checked={playlist} onChange={(event) => { const nextPlaylist = event.target.checked; setPlaylist(nextPlaylist); if (result) void loadMetadata(nextPlaylist); }} /><label htmlFor="playlist">Playlist completa <small>(máximo 50 elementos)</small></label></div><div className="file-summary"><span className="file-icon">{isPlaylistReady ? "▤" : format === "mp4" ? "▣" : "♫"}<small>{isPlaylistReady ? "ZIP" : format.toUpperCase()}</small></span><div><strong>{isPlaylistReady ? `${title}.zip` : `${title}.${format}`}</strong><span>{isPlaylistReady ? `Playlist de ${playlistCount ?? "varios"} canciones` : `${format === "mp4" ? videoQuality === "best" ? "Mejor disponible" : `Hasta ${videoQuality}p` : `${audioQuality} kbps`} / 1 archivo`}</span></div></div><button className="download-button" type="button" disabled={isDownloadLoading || isMetadataLoading || (playlist && !isPlaylistReady)} onClick={handleDownload}>↓ {isDownloadLoading ? "Preparando…" : isPlaylistReady ? "Descargar playlist ZIP" : `Descargar ${format.toUpperCase()}`}<span>{isPlaylistReady ? `${playlistCount ?? 50} elementos` : ""}</span></button>
           {isDownloadLoading && <div className="progress-box"><div className="progress-top"><strong>{progress.message}</strong><b>{Math.round(progress.percent)}%</b></div><div className="progress-track"><div style={{ width: `${progress.percent}%` }} /></div><p>{progress.current && progress.total ? `Elemento ${progress.current} de ${progress.total}` : progress.total ? `Playlist de ${progress.total} elementos` : progress.speed ? `Velocidad: ${progress.speed}` : "Preparando archivos…"}{progress.eta ? ` / ETA: ${progress.eta}` : ""}</p></div>}
           {downloadLogs.length > 0 && (isDownloadLoading || error || download) && <details className="backend-log" open={Boolean(error)}><summary>Actividad del backend</summary><div>{downloadLogs.map((line, index) => <p key={`${index}-${line}`}>{line}</p>)}</div></details>}
-          {download && <div className="download-result"><strong>{download.message}</strong>{download.archive ? <a className="download-all-link" href={download.archive.downloadUrl} download>↓ Descargar {download.archive.count} canciones</a> : download.files.map((file) => <a key={file.downloadUrl} href={file.downloadUrl} download>Guardar {file.filename} ↓</a>)}</div>}
+          {download && <div className="download-result"><strong>{download.message}</strong>{isDesktop ? <>{download.archive ? <button type="button" className="download-all-link" onClick={() => void revealDownload(download.archive?.filename)}>Mostrar {download.archive.filename} en la carpeta</button> : download.files.map((file) => <button type="button" key={file.downloadUrl} onClick={() => void revealDownload(file.filename)}>Mostrar {file.filename} en la carpeta</button>)}</> : download.archive ? <a className="download-all-link" href={download.archive.downloadUrl} download>↓ Descargar {download.archive.count} canciones</a> : download.files.map((file) => <a key={file.downloadUrl} href={file.downloadUrl} download>Guardar {file.filename} ↓</a>)}</div>}
         </div>
       </section>}
       {!result && <div className="empty-state">Pega un enlace arriba para ver su preview, elegir calidad y preparar la descarga.</div>}

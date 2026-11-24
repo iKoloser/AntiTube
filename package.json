@@ -8,7 +8,9 @@
     "build": "pnpm --filter backend build && pnpm --filter frontend build",
     "typecheck": "pnpm --filter backend typecheck && pnpm --filter frontend typecheck",
     "tools:check": "yt-dlp --version && ffmpeg -version",
-    "start": "concurrently \"pnpm --filter frontend start\" \"pnpm --filter backend start\""
+    "start": "concurrently \"pnpm --filter frontend start\" \"pnpm --filter backend start\"",
+    "desktop:dev": "pnpm --filter @antitube/desktop dev",
+    "desktop:build": "pnpm --filter @antitube/desktop build"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"
