@@ -400,6 +400,34 @@ app.post("/api/metadata", async (request: Request, response: Response) => {
   }
 });
 
+// Busca la canción reconocida en YouTube o SoundCloud y devuelve la vista previa del primer resultado.
+app.post("/api/shazam/preview", async (request: Request, response: Response) => {
+  const provider = request.body?.provider === "soundcloud" ? "soundcloud" : "youtube";
+  const query = typeof request.body?.query === "string" ? request.body.query.trim().slice(0, 200) : "";
+  if (!query) {
+    response.status(400).json({ error: "Búsqueda vacía", message: "Falta el título de la canción." });
+    return;
+  }
+  try {
+    const search = await getMediaMetadata(`${provider === "soundcloud" ? "scsearch1" : "ytsearch1"}:${query}`, metadataTimeoutMs, true, 1);
+    const first = search.playlistEntries[0];
+    if (!first?.sourceUrl) {
+      response.status(404).json({ error: "Sin resultados", message: `No se ha encontrado la canción en ${provider === "soundcloud" ? "SoundCloud" : "YouTube"}.` });
+      return;
+    }
+    const metadata = await getMediaMetadata(first.sourceUrl, metadataTimeoutMs, false, 1);
+    const analysis = analyzeUrl(metadata.sourceUrl) ?? analyzeUrl(first.sourceUrl);
+    response.json({ provider, metadata, analysis });
+  } catch (error) {
+    if (error instanceof ExtractorUnavailableError) {
+      response.status(503).json({ error: "Extractor no disponible", message: error.message });
+      return;
+    }
+    const message = error instanceof ExtractorLookupError ? error.message : "No se pudo buscar la canción.";
+    response.status(422).json({ error: "Búsqueda fallida", message });
+  }
+});
+
 app.post("/api/analyze", (request: Request, response: Response) => {
   const analysis = analyzeUrl(request.body?.url);
 

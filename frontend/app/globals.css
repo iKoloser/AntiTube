@@ -2383,3 +2383,75 @@ footer > span:first-child {
 @keyframes badge-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 50% { box-shadow: 0 0 0 5px transparent; } }
 
 @media (prefers-reduced-motion: reduce) { .downloads-nav-badge, .job-card { animation: none; } }
+
+/* ------------------------------------------------------------------
+   SHAZAM: vista previa y opciones de descarga
+   ------------------------------------------------------------------ */
+.shazam-get {
+  display: grid;
+  flex-basis: 100%;
+  gap: var(--space-3);
+  margin: var(--space-2) 0 var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-base) 80%, transparent);
+}
+
+.shazam-get-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.shazam-get-label { color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }
+.shazam-provider-tabs { margin: 0; }
+
+.shazam-preview { display: grid; grid-template-columns: minmax(0, 260px) 1fr; gap: var(--space-4); align-items: center; min-height: 80px; }
+
+.shazam-preview-loading { display: flex; grid-column: 1 / -1; align-items: center; gap: var(--space-3); color: var(--fg-secondary); font-size: 13px; }
+.shazam-preview-error { grid-column: 1 / -1; margin: 0; color: var(--err); font-size: 13px; }
+
+.shazam-preview-media { position: relative; overflow: hidden; aspect-ratio: 16 / 9; border: 1px solid var(--border-strong); border-radius: var(--radius-md); background: var(--bg-deep); }
+.shazam-preview-media iframe { width: 100%; height: 100%; border: 0; }
+
+.shazam-preview-thumb {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  border: 0;
+  background: var(--bg-deep) center / cover no-repeat;
+  cursor: pointer;
+}
+
+.shazam-preview-thumb::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 40%, rgba(0, 0, 0, 0.55)); }
+
+.shazam-preview-play {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 88%, transparent);
+  color: var(--fg-inverse);
+  font-size: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  transition: transform var(--motion-fast);
+}
+
+.shazam-preview-thumb:hover .shazam-preview-play { transform: scale(1.08); }
+
+.shazam-preview-duration { position: absolute; right: 8px; bottom: 8px; z-index: 1; padding: 2px 6px; border-radius: var(--radius-sm); background: rgba(0, 0, 0, 0.75); color: #fff; font-family: var(--font-mono); font-size: 11px; }
+
+.shazam-preview-copy { display: grid; gap: 4px; min-width: 0; }
+.shazam-preview-copy strong { color: var(--fg-primary); font-size: 14px; line-height: 1.35; }
+.shazam-preview-copy span { color: var(--fg-secondary); font-size: 13px; }
+.shazam-preview-copy a { color: var(--accent); font-family: var(--font-mono); font-size: 12px; }
+
+.shazam-get-options { display: grid; grid-template-columns: auto minmax(160px, 1fr) auto; gap: var(--space-3); align-items: center; }
+.shazam-get-options .tabs, .shazam-get-options .select-wrap { margin: 0; }
+.shazam-get-button { width: auto; margin: 0; padding-inline: var(--space-5); }
+
+@media (max-width: 760px) {
+  .shazam-preview { grid-template-columns: 1fr; }
+  .shazam-get-options { grid-template-columns: 1fr; }
+}
