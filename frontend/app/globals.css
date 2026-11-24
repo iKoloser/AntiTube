@@ -2303,3 +2303,83 @@ footer > span:first-child {
 @media (prefers-reduced-motion: reduce) {
   .setup-card, .setup-spinner, .setup-progress.is-indeterminate > div { animation: none; }
 }
+
+/* ------------------------------------------------------------------
+   Descargas: contador del menú y página de cola
+   ------------------------------------------------------------------ */
+.downloads-nav-link { display: inline-flex; align-items: center; gap: 6px; }
+
+.downloads-nav-badge {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--fg-inverse);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  animation: badge-pulse 1.8s ease-in-out infinite;
+}
+
+.progress-hint { margin-top: var(--space-2); color: var(--fg-muted); font-size: 12px; }
+.progress-hint a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+
+.jobs-shell { display: grid; gap: var(--space-5); }
+
+.jobs-heading { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: var(--space-4); }
+.jobs-heading h1 { margin: 0 0 var(--space-2); color: var(--fg-primary); font-size: 26px; font-weight: 600; }
+.jobs-heading-actions { display: flex; gap: var(--space-2); }
+
+.job-list { display: grid; gap: var(--space-3); margin: 0; padding: 0; list-style: none; }
+
+.job-card {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+  animation: setup-rise 300ms ease-out both;
+}
+
+.job-card.is-downloading { border-color: var(--border-strong); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent); }
+.job-card.is-failed { border-color: color-mix(in srgb, var(--err) 55%, var(--border)); }
+
+.job-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 18px;
+}
+
+.job-body { display: grid; gap: 6px; min-width: 0; }
+.job-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.job-head strong { overflow: hidden; color: var(--fg-primary); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+
+.job-meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--fg-muted); font-family: var(--font-mono); font-size: 11.5px; }
+
+.job-detail { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--fg-secondary); font-size: 12.5px; }
+.job-detail b { color: var(--fg-primary); font-family: var(--font-mono); }
+.job-card.is-failed .job-detail { color: var(--err); }
+
+.job-log { overflow: hidden; margin: 0; color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+
+.job-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-1); }
+
+.job-remove { border: 0; background: none; color: var(--fg-muted); font-size: 12px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+.job-remove:hover { color: var(--fg-primary); }
+
+.setup-progress.is-waiting > div { background: var(--border-strong); }
+
+@keyframes badge-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); } 50% { box-shadow: 0 0 0 5px transparent; } }
+
+@media (prefers-reduced-motion: reduce) { .downloads-nav-badge, .job-card { animation: none; } }

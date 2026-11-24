@@ -1,8 +1,9 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express, { type Request, type Response } from "express";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -43,6 +44,15 @@ const downloadDirectory = path.resolve(process.cwd(), process.env.DOWNLOAD_DIR ?
 let activeDownloads = 0;
 
 type DownloadJob = {
+  id: string;
+  title: string;
+  url: string;
+  platform: string;
+  format: DownloadFormat;
+  quality: string;
+  isPlaylist: boolean;
+  createdAt: number;
+  finishedAt: number | null;
   status: "queued" | "downloading" | "completed" | "failed";
   progress: DownloadProgress;
   logs: string[];
@@ -51,6 +61,40 @@ type DownloadJob = {
 };
 
 const downloadJobs = new Map<string, DownloadJob>();
+// Las descargas se procesan de una en una (la detección de archivos generados
+// se basa en los cambios de la carpeta), pero se pueden encolar sin límite.
+const downloadQueue: Array<{ job: DownloadJob; run: () => Promise<void> }> = [];
+const maxFinishedJobs = 50;
+
+function pumpDownloadQueue(): void {
+  if (activeDownloads >= 1) return;
+  const next = downloadQueue.shift();
+  if (!next) return;
+  activeDownloads += 1;
+  void next.run().finally(() => {
+    activeDownloads -= 1;
+    next.job.finishedAt = Date.now();
+    pruneFinishedJobs();
+    pumpDownloadQueue();
+  });
+  refreshQueuePositions();
+}
+
+function refreshQueuePositions(): void {
+  downloadQueue.forEach(({ job }, index) => {
+    job.progress = { ...job.progress, message: index === 0 ? "En cola: empieza en cuanto termine la descarga actual" : `En cola: posición ${index + 1}` };
+  });
+}
+
+function pruneFinishedJobs(): void {
+  const finished = [...downloadJobs.values()].filter((job) => job.status === "completed" || job.status === "failed").sort((a, b) => (b.finishedAt ?? 0) - (a.finishedAt ?? 0));
+  for (const job of finished.slice(maxFinishedJobs)) downloadJobs.delete(job.id);
+}
+
+function publicJob(job: DownloadJob) {
+  const queuePosition = downloadQueue.findIndex((entry) => entry.job === job);
+  return { ...job, jobId: job.id, queuePosition: queuePosition >= 0 ? queuePosition + 1 : null };
+}
 
 app.use(cors({ origin: desktopMode ? desktopOrigins : corsOrigin, credentials: true }));
 app.use(express.json({ limit: "20mb" }));
@@ -234,14 +278,24 @@ app.post("/api/desktop/open", (request: Request, response: Response) => {
   }
   const rawFilename = request.body?.filename;
   const filename = typeof rawFilename === "string" ? path.basename(rawFilename) : "";
-  const target = filename ? path.join(downloadDirectory, filename) : downloadDirectory;
+  const filePath = filename ? path.join(downloadDirectory, filename) : null;
+  // Si el archivo ya no existe (o se renombró), abrimos al menos la carpeta.
+  const reveal = Boolean(filePath && existsSync(filePath));
+  const target = reveal && filePath ? filePath : downloadDirectory;
   const [command, args] = process.platform === "win32"
-    ? ["explorer.exe", filename ? [`/select,${target}`] : [target]]
+    ? ["explorer.exe", [target]]
     : process.platform === "darwin"
-      ? ["open", filename ? ["-R", target] : [target]]
+      ? ["open", reveal ? ["-R", target] : [target]]
       : ["xdg-open", [downloadDirectory]];
   void mkdir(downloadDirectory, { recursive: true }).then(() => {
-    execFile(command, args, { windowsHide: true }, () => undefined);
+    if (process.platform === "win32") {
+      // explorer.exe necesita `/select,"ruta"` literal: el entrecomillado automático de Node
+      // envuelve el argumento entero y Explorer lo ignora cuando el nombre tiene espacios.
+      const explorerArgument = reveal ? `/select,"${target}"` : `"${target}"`;
+      spawn("explorer.exe", [explorerArgument], { windowsVerbatimArguments: true, detached: true, stdio: "ignore" }).on("error", (error) => console.error(`[open] ${error.message}`)).unref();
+      return;
+    }
+    execFile(command, args, () => undefined);
   });
   response.json({ opened: target });
 });
@@ -395,20 +449,30 @@ app.post("/api/download", (request: Request, response: Response) => {
     return;
   }
 
-  if (activeDownloads >= 1) {
-    response.status(429).json({ error: "Descarga ocupada", message: "Solo se permite una descarga simultánea." });
-    return;
-  }
 
   const jobId = randomUUID();
   const initialMessage = playlist
     ? playlistTotal ? `Preparando playlist de ${playlistTotal} elementos…` : "Preparando playlist…"
     : "Preparando descarga…";
-  const job: DownloadJob = { status: "queued", progress: { percent: 0, speed: null, eta: null, current: null, total: playlistTotal, message: initialMessage }, logs: [initialMessage] };
+  const requestedTitle = typeof request.body?.title === "string" ? request.body.title.trim().slice(0, 200) : "";
+  const job: DownloadJob = {
+    id: jobId,
+    title: requestedTitle || playlistTitle || analysis.url,
+    url: analysis.url,
+    platform: analysis.platform,
+    format: format as DownloadFormat,
+    quality: String(quality),
+    isPlaylist: playlist,
+    createdAt: Date.now(),
+    finishedAt: null,
+    status: "queued",
+    progress: { percent: 0, speed: null, eta: null, current: null, total: playlistTotal, message: initialMessage },
+    logs: [initialMessage]
+  };
   downloadJobs.set(jobId, job);
-  activeDownloads += 1;
-  void (async () => {
+  const run = async () => {
     job.status = "downloading";
+    job.progress = { ...job.progress, message: initialMessage };
     try {
       const result = await downloadMedia(
         analysis.url,
@@ -462,11 +526,12 @@ app.post("/api/download", (request: Request, response: Response) => {
         job.error = { error: "Descarga fallida", message };
         job.logs.push(`ERROR: ${message}`);
       }
-    } finally {
-      activeDownloads -= 1;
     }
-  })();
-  response.status(202).json({ jobId, status: job.status, progress: job.progress, logs: job.logs });
+  };
+  downloadQueue.push({ job, run });
+  refreshQueuePositions();
+  pumpDownloadQueue();
+  response.status(202).json(publicJob(job));
 });
 
 app.get("/api/download/:jobId", (request: Request, response: Response) => {
@@ -476,7 +541,41 @@ app.get("/api/download/:jobId", (request: Request, response: Response) => {
     response.status(404).json({ error: "Tarea no encontrada", message: "La tarea de descarga ya no existe." });
     return;
   }
-  response.json({ ...job, jobId });
+  response.json(publicJob(job));
+});
+
+app.get("/api/jobs", (_request: Request, response: Response) => {
+  const jobs = [...downloadJobs.values()].sort((a, b) => b.createdAt - a.createdAt).map((job) => {
+    const { logs, ...rest } = publicJob(job);
+    return { ...rest, lastLog: [...logs].reverse().find((line) => !line.includes("PROGRESS:")) ?? null };
+  });
+  response.json({ jobs, active: jobs.filter((job) => job.status === "queued" || job.status === "downloading").length });
+});
+
+// Quita de la lista una descarga terminada o la saca de la cola si aún no ha empezado.
+app.delete("/api/jobs/:jobId", (request: Request, response: Response) => {
+  const jobId = typeof request.params.jobId === "string" ? request.params.jobId : "";
+  const job = downloadJobs.get(jobId);
+  if (!job) {
+    response.status(404).json({ error: "Tarea no encontrada", message: "La tarea de descarga ya no existe." });
+    return;
+  }
+  if (job.status === "downloading") {
+    response.status(409).json({ error: "Descarga en curso", message: "Espera a que termine esta descarga." });
+    return;
+  }
+  const queueIndex = downloadQueue.findIndex((entry) => entry.job === job);
+  if (queueIndex >= 0) downloadQueue.splice(queueIndex, 1);
+  downloadJobs.delete(jobId);
+  refreshQueuePositions();
+  response.json({ removed: jobId });
+});
+
+app.post("/api/jobs/clear", (_request: Request, response: Response) => {
+  for (const job of [...downloadJobs.values()]) {
+    if (job.status === "completed" || job.status === "failed") downloadJobs.delete(job.id);
+  }
+  response.json({ cleared: true });
 });
 
 app.get("/api/downloads/:filename", (request: Request, response: Response) => {
