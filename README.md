@@ -65,6 +65,7 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 ### SHAZAM
 
 - **Reconocimiento de canciones** con [ShazamIO](https://github.com/shazamio/ShazamIO) a partir de unos segundos de audio.
+- **Un clic y escucha todo el PC:** en la app de escritorio, «Escuchar el sistema» graba lo que suena por los altavoces (YouTube en el navegador, Spotify, un juego…) sin elegir ventana ni pestaña. En la versión web se comparte una pestaña con audio.
 - Enlaces al resultado en YouTube, SoundCloud y Spotify, y descarga directa en MP3.
 
 ### Interfaz

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { AppUpdateBanner } from "./AppUpdate";
-import AntiTubeLogo from "../AntiTubeLogo";
+import BootLogo from "./BootLogo";
 import { apiUrl } from "../runtime";
 import SetupPanel, { type SetupStatus, type SetupStep } from "./SetupPanel";
 
@@ -89,7 +89,7 @@ export default function DesktopGate({ children }: Readonly<{ children: React.Rea
 
   return <main className="desktop-gate">
     <div className="desktop-gate-inner">
-      <div className="desktop-gate-logo"><AntiTubeLogo /></div>
+      <BootLogo />
       {phase === "setup"
         ? <SetupPanel onContinue={() => { sessionStorage.setItem(readyKey, "1"); setPhase("ready"); }} />
         : <BootLog engine={engine} tools={tools} detail={detail} />}

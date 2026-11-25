@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { apiUrl } from "../runtime";
+import { apiUrl, isDesktop, recordSystemAudio, stopSystemAudio } from "../runtime";
 import ShazamDownload from "./ShazamDownload";
 import ShazamHistory from "./ShazamHistory";
 
@@ -58,7 +58,42 @@ export default function ShazamPage() {
   }
 
   function stopRecording() {
+    if (isDesktop) { void stopSystemAudio(); return; }
     if (recorderRef.current?.state === "recording") recorderRef.current.stop();
+  }
+
+  async function recognize(audioBase64: string, mimeType: string) {
+    setIsRecognizing(true);
+    try {
+      const response = await fetch(`${apiUrl()}/api/shazam/recognize`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioBase64, mimeType }) });
+      const data = await response.json() as RecognitionResponse & { message?: string };
+      if (!response.ok) throw new Error(data.message ?? "No se pudo reconocer el audio.");
+      setRecognition(data.recognition);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "No se pudo reconocer el audio.");
+    } finally {
+      setIsRecognizing(false);
+    }
+  }
+
+  /** Escritorio: un clic y escucha todo lo que suena en el PC, sin elegir ventana. */
+  async function listenToSystem() {
+    setError(null);
+    setRecognition(null);
+    setIsRecording(true);
+    setSeconds(0);
+    timerRef.current = setInterval(() => setSeconds((value) => Math.min(captureSeconds, value + 1)), 1000);
+    let wav: string;
+    try {
+      wav = await recordSystemAudio(captureSeconds);
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : String(caughtError || "No se pudo escuchar el audio del sistema."));
+      return;
+    } finally {
+      clearTimers();
+      setIsRecording(false);
+    }
+    await recognize(`data:audio/wav;base64,${wav}`, "audio/wav");
   }
 
 
@@ -103,18 +138,11 @@ export default function ShazamPage() {
         clearTimers();
         audioStream.getTracks().forEach((track) => track.stop());
         setIsRecording(false);
-        setIsRecognizing(true);
         try {
           const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/webm" });
-          const audioBase64 = await blobAsBase64(blob);
-          const response = await fetch(`${apiUrl()}/api/shazam/recognize`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ audioBase64, mimeType: blob.type }) });
-          const data = await response.json() as RecognitionResponse & { message?: string };
-          if (!response.ok) throw new Error(data.message ?? "No se pudo reconocer el audio.");
-          setRecognition(data.recognition);
+          await recognize(await blobAsBase64(blob), blob.type);
         } catch (caughtError) {
           setError(caughtError instanceof Error ? caughtError.message : "No se pudo reconocer el audio.");
-        } finally {
-          setIsRecognizing(false);
         }
       };
       recorderRef.current = recorder;
@@ -135,12 +163,12 @@ export default function ShazamPage() {
 
   return <>
     <main className="page shazam-shell">
-      <section className="shazam-hero"><p className="shazam-kicker">Identificación de audio</p><h1>SHAZAM</h1><p>Graba hasta {captureSeconds} segundos del audio de una pestaña y encuentra la canción.</p></section>
-      <section className="shazam-capture" aria-labelledby="shazam-capture-title"><div className="shazam-capture-copy"><h2 id="shazam-capture-title">Escucha lo que está sonando</h2><p>Al pulsar el botón, comparte la pestaña que reproduce el audio y activa <strong>Compartir audio</strong>. El fragmento se envía a ShazamIO para reconocerlo y se elimina del backend después.</p><div className="shazam-actions"><button className="download-button shazam-record-button" type="button" disabled={isRecognizing} onClick={isRecording ? stopRecording : startRecording}>{isRecording ? `Detener y reconocer · ${seconds}/${captureSeconds}s` : isRecognizing ? "Reconociendo…" : "Grabar audio de la pestaña"}</button>{isRecording && <span className="shazam-live-status" role="status">Grabando ahora</span>}</div></div><div className={`shazam-signal${isRecording ? " is-active" : ""}`} aria-hidden="true"><span /><span /><span /><span /><span /></div></section>
+      <section className="shazam-hero"><p className="shazam-kicker">Identificación de audio</p><h1>SHAZAM</h1><p>{isDesktop ? `Escucha ${captureSeconds} segundos de lo que suena en tu PC y encuentra la canción.` : `Graba hasta ${captureSeconds} segundos del audio de una pestaña y encuentra la canción.`}</p></section>
+      <section className="shazam-capture" aria-labelledby="shazam-capture-title"><div className="shazam-capture-copy"><h2 id="shazam-capture-title">Escucha lo que está sonando</h2>{isDesktop ? <p>Pulsa el botón y AntiTube escucha <strong>todo el audio del sistema</strong>: YouTube en el navegador, Spotify, un juego o tu propio reproductor. Sin elegir ventanas. El fragmento se borra después de reconocerlo.</p> : <p>Al pulsar el botón, comparte la pestaña que reproduce el audio y activa <strong>Compartir audio</strong>. El fragmento se envía a ShazamIO para reconocerlo y se elimina del backend después.</p>}<div className="shazam-actions"><button className="download-button shazam-record-button" type="button" disabled={isRecognizing} onClick={isRecording ? stopRecording : isDesktop ? () => void listenToSystem() : startRecording}>{isRecording ? `Detener y reconocer · ${seconds}/${captureSeconds}s` : isRecognizing ? "Reconociendo…" : isDesktop ? "Escuchar el sistema" : "Grabar audio de la pestaña"}</button>{isRecording && <span className="shazam-live-status" role="status">{isDesktop ? "Escuchando el PC" : "Grabando ahora"}</span>}</div></div><div className={`shazam-signal${isRecording ? " is-active" : ""}`} aria-hidden="true"><span /><span /><span /><span /><span /></div></section>
       {error && <div className="notice error" role="alert">ⓘ <span>{error}</span></div>}
       {recognition?.matched && <section className="shazam-result" aria-live="polite"><div className="shazam-result-art" style={recognition.artworkUrl ? { backgroundImage: `url("${recognition.artworkUrl}")` } : undefined}><span>♪</span></div><div className="shazam-result-copy"><p className="shazam-kicker">Canción reconocida</p><h2>{recognition.title}</h2><p>{recognition.artist}</p><ShazamDownload key={`${recognition.artist}-${recognition.title}`} artist={recognition.artist ?? ""} title={recognition.title ?? ""} /><div className="shazam-links"><div className="shazam-link-group"><span>Enlaces oficiales</span>{recognition.youtubeUrl && <a href={recognition.youtubeUrl} target="_blank" rel="noreferrer">Abrir YouTube ↗</a>}{recognition.soundcloudUrl && <a href={recognition.soundcloudUrl} target="_blank" rel="noreferrer">Abrir SoundCloud ↗</a>}{recognition.spotifyUrl && <a href={recognition.spotifyUrl} target="_blank" rel="noreferrer">Abrir Spotify ↗</a>}{recognition.shazamUrl && <a className="shazam-secondary-link" href={recognition.shazamUrl} target="_blank" rel="noreferrer">Ver en Shazam ↗</a>}</div></div></div></section>}
       {recognition && !recognition.matched && <div className="notice" role="status">No se ha encontrado una coincidencia suficientemente clara. Prueba con un fragmento donde la música suene más limpia.</div>}
-      {!recognition && !error && <p className="shazam-note">Para obtener audio, usa Chrome o Edge, reproduce la música en otra pestaña y comparte <strong>una pestaña de Chrome/Edge</strong> (no una ventana ni la pantalla completa) con <strong>Compartir audio</strong> activado. AntiTube no conserva el fragmento después del reconocimiento.</p>}
+      {!recognition && !error && !isDesktop && <p className="shazam-note">Para obtener audio, usa Chrome o Edge, reproduce la música en otra pestaña y comparte <strong>una pestaña de Chrome/Edge</strong> (no una ventana ni la pantalla completa) con <strong>Compartir audio</strong> activado. AntiTube no conserva el fragmento después del reconocimiento.</p>}
       <ShazamHistory refreshKey={recognition?.matched ? `${recognition.artist}-${recognition.title}` : "inicio"} onSelect={(entry) => { setError(null); setRecognition({ matched: true, title: entry.title, artist: entry.artist, artworkUrl: entry.artworkUrl, shazamUrl: entry.shazamUrl, youtubeUrl: entry.youtubeUrl ?? undefined, soundcloudUrl: entry.soundcloudUrl ?? undefined, spotifyUrl: entry.spotifyUrl ?? undefined }); }} />
     </main>
   </>;

@@ -60,9 +60,29 @@ export async function setCloseToTray(enabled: boolean): Promise<void> {
   await tauriInternals()?.invoke("set_close_to_tray", { enabled }).catch(() => undefined);
 }
 
-/** Pone la ventana de la app a pantalla completa (solo escritorio; en la web no hace nada). */
+let windowFullscreen = false;
+
+/**
+ * Pone la ventana de la app a pantalla completa (solo escritorio; en la web no
+ * hace nada). Ignora peticiones repetidas: en Windows cada cambio redimensiona
+ * la ventana y hace parpadear la barra de tareas.
+ */
 export async function setWindowFullscreen(enabled: boolean): Promise<void> {
+  if (windowFullscreen === enabled) return;
+  windowFullscreen = enabled;
   await tauriInternals()?.invoke("plugin:window|set_fullscreen", { label: "main", value: enabled }).catch(() => undefined);
+}
+
+/** Graba el audio que suena en el equipo (WASAPI loopback). Devuelve un WAV en base64. */
+export async function recordSystemAudio(seconds: number): Promise<string> {
+  const internals = tauriInternals();
+  if (!internals) throw new Error("Escuchar el sistema solo está disponible en la app de escritorio.");
+  return await internals.invoke("record_system_audio", { seconds }) as string;
+}
+
+/** Corta la escucha del sistema antes de tiempo. */
+export async function stopSystemAudio(): Promise<void> {
+  await tauriInternals()?.invoke("stop_system_audio").catch(() => undefined);
 }
 
 export async function quitApp(): Promise<void> {

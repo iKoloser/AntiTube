@@ -20,6 +20,8 @@ export default function Immersive() {
   const { theme } = useTheme();
   const videoRef = useRef<HTMLDivElement | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playerRef = useRef(player);
+  playerRef.current = player;
   const { current, playing, dockVideo } = player;
   const isVideo = current?.kind === "video";
   const tone = current ? theme.hue - 30 + (hue(current.title) % 60) : theme.hue;
@@ -32,16 +34,20 @@ export default function Immersive() {
 
   useEffect(() => {
     if (!open) return;
+    // Solo depende de `open`: el reproductor cambia cada fracción de segundo
+    // y, si estuviera en las dependencias, la ventana entraría y saldría de
+    // pantalla completa sin parar (parpadeo de la barra de tareas).
     void setWindowFullscreen(true);
     const onKey = (event: KeyboardEvent) => {
+      const live = playerRef.current;
       if (event.key === "Escape") setOpen(false);
-      else if (event.key === " ") { event.preventDefault(); player.toggle(); }
-      else if (event.key === "ArrowRight") player.seek(player.time + 5);
-      else if (event.key === "ArrowLeft") player.seek(player.time - 5);
+      else if (event.key === " ") { event.preventDefault(); live.toggle(); }
+      else if (event.key === "ArrowRight") live.seek(live.time + 5);
+      else if (event.key === "ArrowLeft") live.seek(live.time - 5);
     };
     window.addEventListener("keydown", onKey);
     return () => { window.removeEventListener("keydown", onKey); void setWindowFullscreen(false); };
-  }, [open, player]);
+  }, [open]);
 
   useEffect(() => {
     if (!open || !isVideo) return;

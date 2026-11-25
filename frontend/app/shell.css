@@ -809,3 +809,19 @@ html[data-motion="off"] .omnibox::before { animation: none; }
 .landing-card:hover { transform: translateY(-3px); border-color: rgb(var(--accent-rgb) / 0.5); box-shadow: 0 18px 40px -24px var(--accent); }
 .landing-index { color: var(--accent); text-shadow: 0 0 10px rgb(var(--accent-rgb) / 0.6); }
 .empty-state { display: block; text-align: center; line-height: 1.7; }
+
+/* ---------- Logo de arranque ---------- */
+.boot-logo { display: grid; justify-items: center; gap: 14px; margin: 0 auto 6px; text-align: center; animation: boot-logo-in 700ms cubic-bezier(.2,.8,.2,1) both; }
+.boot-emblem { width: clamp(120px, 22vh, 168px); height: auto; overflow: visible; filter: drop-shadow(0 0 28px rgb(var(--accent-rgb) / 0.35)); }
+.boot-ring-outer { transform-origin: 0 0; animation: boot-spin 14s linear infinite; }
+.boot-ring-inner { transform-origin: 0 0; animation: boot-spin 9s linear infinite reverse; }
+.boot-wordmark { display: flex; justify-content: center; font-family: var(--font-mono), monospace; font-weight: 800; font-size: clamp(38px, 6.4vw, 60px); line-height: 1; letter-spacing: 0.22em; /* compensa el espacio tras la última letra para que quede centrado */ padding-left: 0.22em; }
+.boot-anti { background: linear-gradient(180deg, #fff, #bfcbdb); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.boot-tube { background: linear-gradient(120deg, var(--accent-2), var(--accent) 60%, #1d6ff2); -webkit-background-clip: text; background-clip: text; color: transparent; filter: drop-shadow(0 0 14px rgb(var(--accent-rgb) / 0.55)); }
+.boot-rule { position: relative; width: min(360px, 70vw); height: 1px; overflow: hidden; background: rgb(var(--accent-rgb) / 0.18); }
+.boot-rule i { position: absolute; inset: 0 auto 0 0; width: 30%; background: linear-gradient(90deg, transparent, var(--accent), transparent); animation: boot-scan 2.2s ease-in-out infinite; }
+.boot-tagline { margin: 0; padding-left: 0.42em; font-family: var(--font-mono), monospace; font-size: 11px; font-weight: 600; letter-spacing: 0.42em; color: var(--fg-muted); }
+@keyframes boot-spin { to { transform: rotate(360deg); } }
+@keyframes boot-scan { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
+@keyframes boot-logo-in { from { opacity: 0; transform: translateY(10px) scale(.96); filter: blur(4px); } }
+:root[data-motion="off"] .boot-ring-outer, :root[data-motion="off"] .boot-ring-inner, :root[data-motion="off"] .boot-rule i { animation: none; }

@@ -1,6 +1,6 @@
 [package]
 name = "antitube"
-version = "1.0.0-beta.5"
+version = "1.0.0-beta.6"
 description = "AntiTube para escritorio"
 edition = "2021"
 
@@ -15,6 +15,9 @@ tauri-plugin-notification = "2"
 tauri-plugin-single-instance = "2"
 serde_json = "1"
 dunce = "1"
+
+[target.'cfg(windows)'.dependencies]
+cpal = "0.15"
 
 [profile.release]
 codegen-units = 1
