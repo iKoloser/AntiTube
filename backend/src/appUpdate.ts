@@ -32,15 +32,31 @@ export function currentVersion(): string {
   return process.env.ANTITUBE_APP_VERSION ?? "0.0.0";
 }
 
-function parse(version: string): number[] {
-  return version.replace(/^v/, "").split(/[.+-]/).slice(0, 3).map((part) => Number.parseInt(part, 10) || 0);
+function parse(version: string): { core: number[]; pre: string[] } {
+  const [main, ...rest] = version.replace(/^v/, "").split("+")[0].split("-");
+  return { core: main.split(".").slice(0, 3).map((part) => Number.parseInt(part, 10) || 0), pre: rest.join("-") ? rest.join("-").split(".") : [] };
 }
 
+/** Compara versiones semver: 1.0.0 > 1.0.0-beta.2 > 1.0.0-beta.1 > 0.2.1. */
 export function isNewer(candidate: string, current: string): boolean {
   const a = parse(candidate);
   const b = parse(current);
   for (let index = 0; index < 3; index += 1) {
-    if ((a[index] ?? 0) !== (b[index] ?? 0)) return (a[index] ?? 0) > (b[index] ?? 0);
+    if ((a.core[index] ?? 0) !== (b.core[index] ?? 0)) return (a.core[index] ?? 0) > (b.core[index] ?? 0);
+  }
+  if (a.pre.length === 0 || b.pre.length === 0) return a.pre.length === 0 && b.pre.length > 0;
+  for (let index = 0; index < Math.max(a.pre.length, b.pre.length); index += 1) {
+    const left = a.pre[index];
+    const right = b.pre[index];
+    if (left === undefined) return false;
+    if (right === undefined) return true;
+    if (left === right) continue;
+    const leftNumber = /^\d+$/.test(left) ? Number(left) : null;
+    const rightNumber = /^\d+$/.test(right) ? Number(right) : null;
+    if (leftNumber !== null && rightNumber !== null) return leftNumber > rightNumber;
+    if (leftNumber !== null) return false;
+    if (rightNumber !== null) return true;
+    return left > right;
   }
   return false;
 }

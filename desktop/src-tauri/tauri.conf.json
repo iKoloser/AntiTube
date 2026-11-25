@@ -20,10 +20,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "publisher": "iKoloser",
     "shortDescription": "Analiza y descarga contenido multimedia autorizado",
-    "longDescription": "AntiTube es una aplicación local y privada para analizar URLs, descargar MP4/MP3 y reconocer canciones.",
+    "longDescription": "AntiTube es una aplicación local y privada para buscar, descargar y reproducir música y vídeo, recortar fragmentos y reconocer canciones.",
     "category": "Utility",
     "icon": [
       "icons/32x32.png",
@@ -38,12 +40,21 @@
       "resources/node/": "node/"
     },
     "windows": {
-      "webviewInstallMode": { "type": "downloadBootstrapper", "silent": true },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["Spanish", "English"],
+        "languages": [
+          "Spanish",
+          "English"
+        ],
         "displayLanguageSelector": false,
-        "compression": "lzma"
+        "compression": "lzma",
+        "installerIcon": "icons/icon.ico",
+        "sidebarImage": "installer/sidebar.bmp",
+        "headerImage": "installer/header.bmp"
       }
     }
   }
