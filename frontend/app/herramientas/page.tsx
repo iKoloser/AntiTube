@@ -4,6 +4,7 @@ import AppUpdatePanel from "../desktop/AppUpdate";
 import SetupPanel from "../desktop/SetupPanel";
 import { isDesktop } from "../runtime";
 import AppSettings from "./AppSettings";
+import Appearance from "./Appearance";
 import DownloadFolder from "./DownloadFolder";
 
 export default function ToolsPage() {
@@ -13,6 +14,7 @@ export default function ToolsPage() {
       {isDesktop
         ? <>
             <AppUpdatePanel />
+            <Appearance />
             <AppSettings />
             <DownloadFolder />
             <SetupPanel compact />

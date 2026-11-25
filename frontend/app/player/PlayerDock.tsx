@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo } from "react";
-import { IconExpand, IconMute, IconNext, IconPause, IconPlay, IconPrevious, IconQueue, IconRepeat, IconShuffle, IconVolume } from "../shell/icons";
+import { IconExpand, IconFullscreen, IconMute, IconNext, IconPause, IconPlay, IconPrevious, IconQueue, IconRepeat, IconShuffle, IconVolume } from "../shell/icons";
+import { useTheme } from "../shell/theme";
 import { useToast } from "../shell/Toasts";
 import { useDropHandler } from "./dnd";
 import { usePlayer } from "./PlayerContext";
@@ -87,6 +88,7 @@ export default function PlayerDock() {
   const pathname = usePathname();
   const { current, playing, settings } = player;
   const onPlayerPage = pathname?.startsWith("/reproductor");
+  const { theme } = useTheme();
 
   return <footer className={`player-dock${current ? "" : " is-idle"}`} data-drop="queue" aria-label="Reproductor">
     <div className="dock-track">
@@ -116,12 +118,13 @@ export default function PlayerDock() {
       {player.error && <p className="dock-error">{player.error}</p>}
     </div>
     <div className="dock-side">
-      <Visualizer analyser={player.analyser} playing={playing} variant="mini" className="dock-visualizer" hue={current ? 190 + (hue(current.title) % 50) : 205} />
+      <Visualizer analyser={player.analyser} playing={playing} variant="mini" className="dock-visualizer" hue={current ? theme.hue - 25 + (hue(current.title) % 50) : theme.hue} />
       <div className="dock-volume">
         <button type="button" className="icon-button" onClick={player.toggleMute} aria-label={settings.muted ? "Activar sonido" : "Silenciar"}>{settings.muted || settings.volume === 0 ? <IconMute size={17} /> : <IconVolume size={17} />}</button>
         <input type="range" className="volume-range" min={0} max={1} step={0.01} value={settings.muted ? 0 : settings.volume} onChange={(event) => player.setVolume(Number(event.target.value))} aria-label="Volumen" style={{ ["--level" as string]: `${(settings.muted ? 0 : settings.volume) * 100}%` }} />
       </div>
       <Link href="/reproductor/#cola" className="icon-button" aria-label="Ver la cola" title="Cola"><IconQueue size={18} />{player.queue.length > 0 && <span className="dock-count">{player.queue.length}</span>}</Link>
+      <button type="button" className="icon-button" disabled={!current} onClick={() => window.dispatchEvent(new Event("antitube-immersive"))} aria-label="Modo inmersivo" title="Modo inmersivo"><IconFullscreen size={16} /></button>
       {!onPlayerPage && <Link href="/reproductor/" className="icon-button" aria-label="Abrir el reproductor" title="Abrir el reproductor"><IconExpand size={16} /></Link>}
     </div>
   </footer>;

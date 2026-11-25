@@ -69,9 +69,14 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 
 ### Interfaz
 
-- Diseño oscuro con aire **hacker / terminal**: tipografía monoespaciada, brillos neón, rejilla de fondo y animaciones suaves.
-- **Adaptable:** funciona desde ventanas grandes hasta muy estrechas, con navegación lateral plegable.
-- Navegación instantánea entre secciones sin cortar la música.
+- **Consola viva:** el fondo es un horizonte de rejilla en perspectiva con lluvia de datos y chispas que laten con los graves de lo que suena.
+- **Cinco temas de color:** Cian, Matrix (verde fósforo), Ámbar (monitor CRT), Neón (cyberpunk) y Red team. Todo el diseño, el fondo y el visualizador cambian de color.
+- **Paleta de comandos** con <kbd>Ctrl</kbd> <kbd>K</kbd>, estilo terminal: navegar, controlar la música, buscar en tu biblioteca o en internet, abrir un enlace y cambiar el tema sin tocar el ratón.
+- **Modo inmersivo:** lo que suena a pantalla completa con un visualizador enorme, la portada girando y el título con efecto glitch.
+- **Arranque como una terminal:** cada paso real del arranque aparece como una línea del registro.
+- **Telemetría en vivo** en la barra superior: velocidad total de descarga con su gráfica, descargas activas y reloj.
+- **Efecto CRT** opcional (líneas de barrido) y transiciones de escaneo entre secciones. Las animaciones se pueden reducir en Ajustes.
+- **Adaptable:** funciona desde ventanas grandes hasta muy estrechas, con navegación lateral plegable, y la música no se corta al cambiar de sección.
 
 ## Instalación
 

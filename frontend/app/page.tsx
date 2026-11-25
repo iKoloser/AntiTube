@@ -9,6 +9,7 @@ import { previewTrack, usePlayer } from "./player/PlayerContext";
 import { formatTime } from "./player/types";
 import { apiUrl, isDesktop, revealDownload } from "./runtime";
 import SearchResults, { providers, type SearchProvider } from "./SearchResults";
+import { pendingOmniboxKey } from "./shell/omnibox";
 import { IconDownload, IconLink, IconPlay, IconScissors, IconSearch } from "./shell/icons";
 import { useToast } from "./shell/Toasts";
 import Trimmer, { type Section } from "./Trimmer";
@@ -63,6 +64,33 @@ function looksLikePlaylist(value: string): boolean {
 
 const extensionOf: Record<DownloadFormat, string> = { mp4: "mp4", mp3: "mp3", m4a: "m4a", opus: "opus", flac: "flac" };
 
+function useTypewriter(lines: string[], active: boolean): string {
+  const [text, setText] = useState(lines[0]);
+  const linesRef = useRef(lines);
+  useEffect(() => {
+    if (!active || document.documentElement.dataset.motion === "off") return;
+    let line = 0;
+    let position = linesRef.current[0].length;
+    let deleting = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const step = () => {
+      const current = linesRef.current[line];
+      if (deleting) {
+        position -= 2;
+        if (position <= 0) { deleting = false; line = (line + 1) % linesRef.current.length; position = 0; }
+      } else {
+        position += 1;
+        if (position >= linesRef.current[line].length) { deleting = true; setText(linesRef.current[line]); timer = setTimeout(step, 2600); return; }
+      }
+      setText(`${(deleting ? current : linesRef.current[line]).slice(0, Math.max(0, position))}▌`);
+      timer = setTimeout(step, deleting ? 18 : 55);
+    };
+    timer = setTimeout(step, 2600);
+    return () => clearTimeout(timer);
+  }, [active]);
+  return text;
+}
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [url, setUrl] = useState("");
@@ -104,6 +132,20 @@ export default function Home() {
   }, []);
 
   const stableProviders = useMemo(() => searchProviders, [searchProviders]);
+
+  // La paleta de comandos (Ctrl+K) puede mandar aquí una búsqueda o un enlace.
+  const runRef = useRef(runOmnibox);
+  runRef.current = runOmnibox;
+  useEffect(() => {
+    const pending = sessionStorage.getItem(pendingOmniboxKey);
+    if (pending) { sessionStorage.removeItem(pendingOmniboxKey); void runRef.current(pending); }
+    const onCommand = (event: Event) => { sessionStorage.removeItem(pendingOmniboxKey); void runRef.current(String((event as CustomEvent).detail ?? "")); };
+    window.addEventListener("antitube-omnibox", onCommand);
+    return () => window.removeEventListener("antitube-omnibox", onCommand);
+  }, []);
+
+  // Sugerencias que se van escribiendo solas en la caja, como en una terminal.
+  const typed = useTypewriter(["Busca una canción, artista o vídeo…", "Pega un enlace de YouTube, TikTok, Bandcamp…", "daft punk around the world", "lofi hip hop para estudiar", "https://youtu.be/…"], input.length === 0);
 
   function toggleProvider(id: SearchProvider) {
     setSearchProviders((current) => {
@@ -158,9 +200,14 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const value = input.trim();
+    await runOmnibox(input);
+  }
+
+  async function runOmnibox(raw: string) {
+    const value = raw.trim();
     if (!value) return;
-    if (isUrl) {
+    setInput(value);
+    if (looksLikeUrl(value)) {
       setSearchQuery(null);
       await analyze(normalizeUrl(value));
     } else {
@@ -246,7 +293,7 @@ export default function Home() {
       <form className={`omnibox${isUrl ? " is-url" : ""}`} onSubmit={handleSubmit}>
         <span className="omnibox-icon" aria-hidden="true">{isUrl ? <IconLink size={20} /> : <IconSearch size={20} />}</span>
         <label className="sr-only" htmlFor="omnibox">Busca una canción o pega un enlace</label>
-        <input id="omnibox" type="text" value={input} onChange={(event) => setInput(event.target.value)} placeholder="Busca una canción, artista o vídeo… o pega un enlace" autoComplete="off" spellCheck={false} />
+        <input id="omnibox" type="text" value={input} onChange={(event) => setInput(event.target.value)} placeholder={typed} autoComplete="off" spellCheck={false} />
         <button type="submit" disabled={isLoading || !input.trim()}>{isLoading ? "Analizando…" : isUrl ? "Analizar enlace" : "Buscar"}</button>
       </form>
       <div className="omnibox-options">
@@ -314,10 +361,10 @@ export default function Home() {
 
     {!result && !searchQuery && <section className="landing">
       <div className="landing-grid">
-        <div className="landing-card"><span className="landing-index">01</span><strong>Busca sin salir</strong><p>YouTube, YouTube Music y SoundCloud a la vez. Escucha antes de bajar.</p></div>
+        <div className="landing-card"><span className="landing-index">01</span><strong>Busca sin salir</strong><p>YouTube, YouTube Music, Bandcamp, Audius y SoundCloud a la vez. Escucha o mira antes de bajar.</p></div>
         <div className="landing-card"><span className="landing-index">02</span><strong>Audio real</strong><p>M4A y Opus originales sin recomprimir. FLAC solo cuando la fuente es sin pérdida.</p></div>
         <div className="landing-card"><span className="landing-index">03</span><strong>Recorta</strong><p>Elige el trozo exacto con vista previa y baja solo eso.</p></div>
-        <div className="landing-card"><span className="landing-index">04</span><strong>Escucha</strong><p>Tu biblioteca, listas y ecualizador en el <Link href="/reproductor/">reproductor</Link>.</p></div>
+        <div className="landing-card"><span className="landing-index">04</span><strong>Escucha y mira</strong><p>Música y vídeo con listas, ecualizador y modo inmersivo en el <Link href="/reproductor/">reproductor</Link>.</p></div>
       </div>
       <details className="platform-strip"><summary className="platform-strip-heading"><span className="platform-summary-title"><span className="platform-summary-mark" aria-hidden="true">+</span><strong>Plataformas compatibles</strong></span><span className="platform-summary-hint">Ver sitios admitidos</span></summary><div className="platform-list">{supportedPlatforms.map((platform) => <div className="platform-item" key={platform.name}><span className="platform-mark" aria-hidden="true">{platform.mark}</span><span className="platform-copy"><strong>{platform.name}</strong><small>{platform.detail}</small></span></div>)}</div></details>
     </section>}

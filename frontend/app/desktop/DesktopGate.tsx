@@ -4,19 +4,32 @@ import { useEffect, useState } from "react";
 import { AppUpdateBanner } from "./AppUpdate";
 import AntiTubeLogo from "../AntiTubeLogo";
 import { apiUrl } from "../runtime";
-import SetupPanel, { SetupSteps, type SetupStatus, type SetupStep } from "./SetupPanel";
+import SetupPanel, { type SetupStatus, type SetupStep } from "./SetupPanel";
 
 const readyKey = "antitube-desktop-ready";
 
 type Phase = "init" | "booting" | "setup" | "ready" | "failed";
 
-function bootSteps(engine: SetupStep["status"], tools: SetupStep["status"], detail: string): SetupStep[] {
-  const base = { optional: false, version: null, source: null, percent: null } as const;
-  return [
-    { ...base, id: "engine", title: "Abrir AntiTube", description: "Ventana e interfaz cargadas.", status: "done", detail: "Listo" },
-    { ...base, id: "ytdlp", title: "Iniciar el motor local", description: "Servidor privado en 127.0.0.1, sin acceso desde la red.", status: engine, detail: engine === "done" ? "En marcha" : detail },
-    { ...base, id: "ffmpeg", title: "Comprobar herramientas", description: "yt-dlp, FFmpeg y SHAZAM.", status: tools, detail: tools === "done" ? "Comprobadas" : tools === "checking" ? "Buscando en tu equipo…" : "En espera" }
+type LogLine = { tag: "OK" | ".." | "FAIL"; text: string };
+
+/** Arranque como el de una terminal: cada paso real aparece como una línea del registro. */
+function BootLog({ engine, tools, detail }: Readonly<{ engine: SetupStep["status"]; tools: SetupStep["status"]; detail: string }>) {
+  const lines: LogLine[] = [
+    { tag: "OK", text: "antitube 1.0 · interfaz cargada" },
+    { tag: "OK", text: "tema, efectos y reproductor preparados" }
   ];
+  if (engine === "error") lines.push({ tag: "FAIL", text: detail });
+  else if (engine !== "done") lines.push({ tag: "..", text: `arrancando el motor local en 127.0.0.1 · ${detail.toLowerCase()}` });
+  else {
+    lines.push({ tag: "OK", text: "motor local en línea · solo accesible desde este equipo" });
+    if (tools === "done") lines.push({ tag: "OK", text: "yt-dlp, FFmpeg y SHAZAM comprobados" }, { tag: "OK", text: "listo ▸ abriendo AntiTube" });
+    else lines.push({ tag: "..", text: "buscando yt-dlp, FFmpeg y SHAZAM en tu equipo" });
+  }
+  const progress = engine === "error" ? 100 : engine !== "done" ? 35 : tools === "done" ? 100 : 70;
+  return <div className="boot-log" aria-live="polite">
+    {lines.map((line, index) => <div key={`${index}-${line.tag}`} className={`boot-line is-${line.tag === "OK" ? "ok" : line.tag === "FAIL" ? "err" : "run"}`}><span className="boot-tag">[{line.tag === ".." ? " .. " : line.tag === "OK" ? " OK " : "FAIL"}]</span><span>{line.text}</span></div>)}
+    <div className="boot-bar"><i style={{ width: `${progress}%` }} /></div>
+  </div>;
 }
 
 /**
@@ -79,10 +92,7 @@ export default function DesktopGate({ children }: Readonly<{ children: React.Rea
       <div className="desktop-gate-logo"><AntiTubeLogo /></div>
       {phase === "setup"
         ? <SetupPanel onContinue={() => { sessionStorage.setItem(readyKey, "1"); setPhase("ready"); }} />
-        : <div className="setup-card is-compact" aria-live="polite">
-            <div className="setup-card-head"><div><p className="setup-kicker">Arranque</p><h2>{phase === "failed" ? "No se pudo iniciar" : "Iniciando AntiTube"}</h2></div></div>
-            <SetupSteps steps={bootSteps(engine, tools, detail)} />
-          </div>}
+        : <BootLog engine={engine} tools={tools} detail={detail} />}
     </div>
   </main>;
 }

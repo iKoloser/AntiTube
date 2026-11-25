@@ -7,6 +7,7 @@ import { Cover, SeekBar } from "../player/PlayerDock";
 import { absolute, formatTime, hue } from "../player/types";
 import Visualizer from "../player/Visualizer";
 import { setWindowFullscreen } from "../runtime";
+import { useTheme } from "../shell/theme";
 import { IconCinema, IconClose, IconEq, IconFullscreen, IconFullscreenExit, IconMute, IconNext, IconPause, IconPip, IconPlay, IconPrevious, IconRepeat, IconShuffle, IconTimer, IconVolume } from "../shell/icons";
 
 type Mode = "radial" | "bars" | "wave";
@@ -133,7 +134,8 @@ export default function NowPlaying({ cinema = false, onCinema }: Readonly<{ cine
   const [mode, setMode] = useState<Mode>("radial");
   const [showEq, setShowEq] = useState(false);
   const [now, setNow] = useState(Date.now());
-  const tone = current ? 185 + (hue(current.title) % 70) : 205;
+  const { theme } = useTheme();
+  const tone = current ? theme.hue - 30 + (hue(current.title) % 60) : theme.hue;
   const isVideo = current?.kind === "video";
   const closeEq = useCallback(() => setShowEq(false), []);
 
@@ -188,6 +190,7 @@ export default function NowPlaying({ cinema = false, onCinema }: Readonly<{ cine
       <div className="np-tool-row">
         <label className="mini-select" title="Velocidad"><span>×</span><select value={settings.rate} onChange={(event) => player.setRate(Number(event.target.value))} aria-label="Velocidad">{[0.5, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2].map((rate) => <option key={rate} value={rate}>{rate}</option>)}</select></label>
         <label className={`mini-select${player.sleepAt ? " is-on" : ""}`} title="Temporizador para dormir"><IconTimer size={15} /><select value="" onChange={(event) => player.setSleep(event.target.value === "off" ? null : Number(event.target.value))} aria-label="Temporizador"><option value="" disabled>{player.sleepAt ? `${Math.max(0, Math.ceil((player.sleepAt - now) / 60000))} min` : "Dormir"}</option><option value="15">15 min</option><option value="30">30 min</option><option value="45">45 min</option><option value="60">1 hora</option><option value="90">1 h 30</option>{player.sleepAt && <option value="off">Cancelar</option>}</select></label>
+        <button type="button" className="chip-button" disabled={!current} onClick={() => window.dispatchEvent(new Event("antitube-immersive"))} title="Modo inmersivo">◎ Inmersivo</button>
         <button type="button" className={`chip-button${showEq || settings.eqEnabled ? " is-accent" : ""}`} onClick={() => setShowEq((value) => !value)}><IconEq size={15} /> EQ</button>
         {!isVideo && <button type="button" className="chip-button" onClick={cycleMode} title="Cambiar visualizador">{mode === "radial" ? "◎" : mode === "bars" ? "▮▮▮" : "∿"}</button>}
       </div>

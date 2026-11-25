@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import AntiTubeLogo from "../AntiTubeLogo";
+import FuturisticBackground from "../FuturisticBackground";
 import { useJobs, type JobSummary } from "../jobs";
 import { DragProvider } from "../player/dnd";
 import { PlayerProvider, usePlayer } from "../player/PlayerContext";
@@ -11,6 +12,11 @@ import PlayerDock, { PlayerDropHandler } from "../player/PlayerDock";
 import { toPlayerTrack } from "../player/types";
 import { api, apiUrl, isDesktop, listenTauri, setCloseToTray } from "../runtime";
 import { IconDownload, IconFolder, IconPlayer, IconQueue, IconTools, IconWave } from "./icons";
+import CommandPalette, { openCommandPalette } from "./CommandPalette";
+import Immersive from "./Immersive";
+import LiveBackground from "./LiveBackground";
+import Telemetry from "./Telemetry";
+import { ThemeProvider } from "./theme";
 import { ToastProvider, useToast } from "./Toasts";
 
 export const closeToTrayKey = "antitube-close-to-tray";
@@ -154,7 +160,9 @@ function Shell({ children }: Readonly<{ children: React.ReactNode }>) {
 
   const current = navItems.find((item) => item.match(pathname));
 
-  return <div className={`app-shell${collapsed ? " is-collapsed" : ""}`}>
+  return <>
+  <LiveBackground />
+  <div className={`app-shell${collapsed ? " is-collapsed" : ""}`}>
     <aside className="app-sidebar">
       <div className="sidebar-top">
         <Link className="brand" href="/" aria-label="AntiTube, inicio"><AntiTubeLogo /></Link>
@@ -178,15 +186,23 @@ function Shell({ children }: Readonly<{ children: React.ReactNode }>) {
       {!isDesktop && <WebLogout />}
     </aside>
     <div className="app-main">
-      <div className="app-topbar"><span className="topbar-path">~/antitube/<b>{(current?.label ?? "inicio").toLowerCase()}</b><i className="topbar-caret" /></span><span className="topbar-meta">{active > 0 ? `${active} descarga(s) en curso` : "en espera"}</span></div>
-      <div className="app-content">{children}</div>
+      <div className="app-topbar">
+        <span className="topbar-path">~/antitube/<b>{(current?.label ?? "inicio").toLowerCase()}</b><i className="topbar-caret" /></span>
+        <button type="button" className="topbar-command" onClick={openCommandPalette} title="Paleta de comandos"><span>&gt;_ ejecutar comando…</span><kbd>Ctrl</kbd><kbd>K</kbd></button>
+        <Telemetry jobs={jobs} active={active} />
+      </div>
+      <div className="app-content"><div key={pathname} className="page-transition">{children}</div></div>
     </div>
     <PlayerDock />
     <JobWatcher jobs={jobs} />
     <TrayBridge />
     <FileDropBridge />
     <PlayerDropHandler />
-  </div>;
+    <CommandPalette />
+    <Immersive />
+  </div>
+  <div className="crt-overlay" aria-hidden="true" />
+  </>;
 }
 
 function WebLogout() {
@@ -195,6 +211,6 @@ function WebLogout() {
 
 export default function AppShell({ children }: Readonly<{ children: React.ReactNode }>) {
   const pathname = usePathname();
-  if (pathname === "/acceso" || pathname === "/acceso/") return <>{children}</>;
-  return <ToastProvider><PlayerProvider><DragProvider><Shell>{children}</Shell></DragProvider></PlayerProvider></ToastProvider>;
+  if (pathname === "/acceso" || pathname === "/acceso/") return <><FuturisticBackground />{children}</>;
+  return <ThemeProvider><ToastProvider><PlayerProvider><DragProvider><Shell>{children}</Shell></DragProvider></PlayerProvider></ToastProvider></ThemeProvider>;
 }

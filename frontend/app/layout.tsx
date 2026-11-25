@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./shell.css";
-import FuturisticBackground from "./FuturisticBackground";
 import AuthGate from "./AuthGate";
 import AppShell from "./shell/AppShell";
+import { themeBootScript } from "./shell/themeData";
 
 export const metadata: Metadata = {
   title: "AntiTube",
@@ -12,9 +12,9 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="es">
+    <html lang="es" suppressHydrationWarning>
+      <head><script dangerouslySetInnerHTML={{ __html: themeBootScript }} /></head>
       <body>
-        <FuturisticBackground />
         <AuthGate><AppShell>{children}</AppShell></AuthGate>
       </body>
     </html>
