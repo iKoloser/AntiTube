@@ -10,6 +10,8 @@
 //!    como notificaciones de Windows y en el icono de la bandeja.
 //! 5. Al cerrar la ventana se queda en la bandeja; «Salir» detiene el backend.
 
+mod loopback;
+
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpListener;
@@ -272,7 +274,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(WindowPrefs { close_to_tray: AtomicBool::new(true), tray_hint_shown: AtomicBool::new(false) })
-        .invoke_handler(tauri::generate_handler![install_update, set_close_to_tray, quit_app])
+        .invoke_handler(tauri::generate_handler![install_update, set_close_to_tray, quit_app, loopback::record_system_audio, loopback::stop_system_audio])
         .setup(|app| {
             let port = free_port();
             let child = spawn_backend(app, port)?;
