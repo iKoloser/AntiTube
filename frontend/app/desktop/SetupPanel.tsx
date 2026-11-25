@@ -179,6 +179,7 @@ export default function SetupPanel({ onContinue, compact = false }: Readonly<{ o
       <button type="button" className="setup-secondary" disabled={busy} onClick={() => void post("/api/setup/check")}>Volver a comprobar</button>
     </div>
     {checkedAt > 0 && <p className="setup-footnote">Última comprobación: {new Date(checkedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}</p>}
+    {status.ready && <p className="setup-footnote">Cada vez que abres AntiTube, yt-dlp, SHAZAM y su copia de FFmpeg se ponen al día solos. Si usas el yt-dlp o el FFmpeg de tu sistema, «Actualizar» instala la copia de AntiTube y a partir de ahí se mantiene sola.</p>}
     <p className="setup-footnote">Carpeta de herramientas: <code>{status.toolsDirectory}</code></p>
   </div>;
 }

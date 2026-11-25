@@ -389,20 +389,25 @@ async function checkYtDlpUpdate(): Promise<UpdateInfo> {
   const latest = pypi.info.version;
   const current = steps.ytdlp.version;
   const available = current !== null && !sameVersion(latest, current);
-  const canUpdate = steps.ytdlp.source === "managed";
+  // Si el yt-dlp es del sistema, «actualizar» instala la copia propia de AntiTube, que pasa a usarse.
+  const canUpdate = ytDlpDownloadUrl() !== null;
   return {
     latest,
     available,
     canUpdate,
-    note: !available ? `yt-dlp ${current ?? latest}: última versión` : canUpdate ? `Nueva versión ${latest} (tienes ${current})` : `Hay ${latest}; actualízalo con tu gestor de paquetes`,
+    note: !available ? `yt-dlp ${current ?? latest}: última versión` : `Nueva versión ${latest} (tienes ${current})`,
     checkedAt: Date.now()
   };
 }
 
 async function checkFfmpegUpdate(): Promise<UpdateInfo> {
   const download = ffmpegDownload();
-  if (steps.ffmpeg.source !== "managed" || !download) {
+  if (!download) {
     return { latest: null, available: false, canUpdate: false, note: "FFmpeg del sistema: se actualiza fuera de AntiTube", checkedAt: Date.now() };
+  }
+  if (steps.ffmpeg.source !== "managed") {
+    // No se puede saber la fecha del FFmpeg del sistema: se ofrece pasar a la copia de AntiTube, que sí se actualiza sola.
+    return { latest: null, available: true, canUpdate: true, note: "Usas el FFmpeg del sistema. Pulsa Actualizar para que AntiTube instale y mantenga su propia copia al día.", checkedAt: Date.now() };
   }
   const response = await fetch(download.url, { method: "HEAD", redirect: "follow", headers: { "User-Agent": "AntiTube-desktop" } });
   const lastModified = response.headers.get("last-modified");
@@ -451,58 +456,68 @@ export async function checkUpdates(): Promise<void> {
   }
 }
 
+async function applyUpdate(id: SetupStepId): Promise<void> {
+  lastError = null;
+  try {
+    if (id === "ytdlp") {
+      update("ytdlp", { status: "running", detail: "Actualizando yt-dlp…", percent: null });
+      if (steps.ytdlp.source === "managed") await runLogged(managedYtDlp(), ["-U"], "ytdlp");
+      else await installYtDlp();
+      await detectYtDlp();
+    } else if (id === "ffmpeg") {
+      await installFfmpeg();
+    } else {
+      const python = process.env.PYTHON_BIN;
+      if (!python) throw new Error("SHAZAM no está instalado.");
+      update("shazam", { status: "running", detail: "Actualizando ShazamIO…", percent: null });
+      const managed = python === managedPython();
+      await runLogged(python, ["-m", "pip", "install", "--upgrade", ...(managed ? [] : ["--user"]), "--disable-pip-version-check", "--no-warn-script-location", "shazamio"]);
+      await detectShazam();
+    }
+    delete updates[id];
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error inesperado.";
+    // Si la actualización falla, la versión anterior sigue instalada: volvemos a detectarla.
+    if (id === "ytdlp") await detectYtDlp();
+    else if (id === "ffmpeg") await detectFfmpeg();
+    else await detectShazam();
+    updates[id] = { latest: updates[id]?.latest ?? null, available: true, canUpdate: true, note: `No se pudo actualizar: ${message}`, checkedAt: Date.now() };
+  }
+}
+
 /** Aplica la actualización de una herramienta. Devuelve false si ya hay trabajo en curso. */
 export function runUpdate(id: SetupStepId): boolean {
   if (running || !["ytdlp", "ffmpeg", "shazam"].includes(id)) return false;
   running = true;
-  lastError = null;
-  void (async () => {
-    try {
-      if (id === "ytdlp") {
-        if (steps.ytdlp.source !== "managed") throw new Error("yt-dlp es del sistema; actualízalo con tu gestor de paquetes.");
-        update("ytdlp", { status: "running", detail: "Actualizando yt-dlp…", percent: null });
-        await runLogged(managedYtDlp(), ["-U"], "ytdlp");
-        await detectYtDlp();
-      } else if (id === "ffmpeg") {
-        await installFfmpeg();
-      } else {
-        const python = process.env.PYTHON_BIN;
-        if (!python) throw new Error("SHAZAM no está instalado.");
-        update("shazam", { status: "running", detail: "Actualizando ShazamIO…", percent: null });
-        const managed = python === managedPython();
-        await runLogged(python, ["-m", "pip", "install", "--upgrade", ...(managed ? [] : ["--user"]), "--disable-pip-version-check", "--no-warn-script-location", "shazamio"]);
-        await detectShazam();
-      }
-      delete updates[id];
-      running = false;
-      await checkUpdates();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Error inesperado.";
-      // Si la actualización falla, la versión anterior sigue instalada: volvemos a detectarla.
-      if (id === "ytdlp") await detectYtDlp();
-      else if (id === "ffmpeg") await detectFfmpeg();
-      else await detectShazam();
-      updates[id] = { latest: updates[id]?.latest ?? null, available: true, canUpdate: true, note: `No se pudo actualizar: ${message}`, checkedAt: Date.now() };
-    } finally {
-      running = false;
-    }
-  })();
+  void applyUpdate(id).finally(() => {
+    running = false;
+    void checkUpdates();
+  });
   return true;
 }
 
 /**
- * YouTube cambia a menudo su reproductor y solo la última versión de yt-dlp sabe
- * resolver sus retos («n challenge»). Al arrancar, si hay una versión nueva de la
- * copia de yt-dlp que gestiona AntiTube, se instala sola en segundo plano.
+ * Al abrir la app se ponen al día solas las herramientas que lo necesitan:
+ * yt-dlp (YouTube cambia a menudo y solo la última versión sabe resolver sus
+ * retos), ShazamIO y la copia de FFmpeg de AntiTube cuando tiene más de una semana.
  */
-export async function autoUpdateYtDlp(): Promise<void> {
-  if (steps.ytdlp.status !== "done" || steps.ytdlp.source !== "managed") return;
+export async function autoUpdateTools(): Promise<void> {
+  if (running) return;
+  await checkUpdates();
+  const pending = (["ytdlp", "shazam", "ffmpeg"] as SetupStepId[]).filter((id) => {
+    const info = updates[id];
+    if (!info?.available || !info.canUpdate || steps[id].status !== "done") return false;
+    // FFmpeg del sistema: solo se cambia por la copia propia si el usuario lo pide.
+    return !(id === "ffmpeg" && steps.ffmpeg.source !== "managed");
+  });
+  if (pending.length === 0 || running) return;
+  running = true;
   try {
-    updates.ytdlp = await checkYtDlpUpdate();
-  } catch {
-    return;
+    for (const id of pending) await applyUpdate(id);
+  } finally {
+    running = false;
   }
-  if (updates.ytdlp?.available && updates.ytdlp.canUpdate) runUpdate("ytdlp");
+  await checkUpdates();
 }
 
 export function setupStatus() {

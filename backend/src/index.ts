@@ -14,7 +14,7 @@ import { createLibraryRouter } from "./library.js";
 import { createMediaRouter } from "./media.js";
 import { defaultDownloadDirectory, downloadDirectory, loadSettings, maxConcurrentDownloads, setDownloadDirectory, setMaxConcurrentDownloads } from "./settings.js";
 import { addToHistory, listHistory, removeFromHistory } from "./shazamHistory.js";
-import { autoUpdateYtDlp, checkUpdates, detectTools, runSetup, runUpdate, setupStatus, type SetupStepId } from "./setup.js";
+import { autoUpdateTools, checkUpdates, detectTools, runSetup, runUpdate, setupStatus, type SetupStepId } from "./setup.js";
 
 // En la versión de escritorio la configuración llega por variables de entorno
 // desde la app Tauri; no se leen archivos .env.
@@ -452,7 +452,7 @@ if (desktopMode) {
   process.stdin.on("end", () => process.exit(0));
   process.stdin.on("error", () => process.exit(0));
   process.stdin.resume();
-  void detectTools().then(() => autoUpdateYtDlp());
+  void detectTools().then(() => autoUpdateTools());
   void loadSettings().finally(() => {
     // Restos de descargas interrumpidas al cerrar la app.
     void rm(path.join(downloadDirectory(), ".antitube-temp"), { recursive: true, force: true }).catch(() => undefined);
