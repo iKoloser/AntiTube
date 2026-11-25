@@ -29,6 +29,7 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 ### Buscar y descargar
 
 - **Buscador integrado** en YouTube, YouTube Music, Bandcamp, Audius y SoundCloud. Se buscan varias plataformas a la vez y cada resultado se puede escuchar, ver, abrir con todas las opciones o mandar directo a la cola.
+- **Escuchar en streaming sin descargar:** «Escuchar» reproduce solo el audio al momento y sigue con el resto de resultados como una cola; «Escuchar todo» los pone todos, ＋ añade uno a la cola y una playlist pegada también se puede escuchar entera. La siguiente canción se prepara por adelantado para que no haya silencios.
 - **Pega cualquier enlace** de los más de 1.000 sitios que soporta yt-dlp: YouTube, TikTok, Twitch, Twitter/X, Vimeo, Instagram, Reddit, Bilibili y más.
 - **Formatos de audio reales**, sin conversiones que empeoren el sonido:
   - **M4A (AAC)** y **OPUS** se guardan tal cual los emite la plataforma.

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { previewTrack, usePlayer } from "./player/PlayerContext";
+import { previewTrack, streamTrack, usePlayer } from "./player/PlayerContext";
 import { formatTime } from "./player/types";
 import { api } from "./runtime";
-import { IconDownload, IconLink, IconPlay } from "./shell/icons";
+import { IconDownload, IconHeadphones, IconLink, IconPlay, IconPlus } from "./shell/icons";
 import { useToast } from "./shell/Toasts";
 
 export type SearchProvider = "youtube" | "ytmusic" | "soundcloud" | "bandcamp" | "audius";
@@ -45,6 +45,18 @@ export default function SearchResults({ query, selected, onOpen, onQuickDownload
     return () => controller.abort();
   }, [query, selected]);
 
+  const toStream = (result: Result) => streamTrack(result.url, { title: result.title, artist: result.uploader, cover: result.thumbnailUrl, durationSeconds: result.durationSeconds });
+
+  /** Escuchar en streaming: suena este resultado y, detrás, el resto de la lista. */
+  function listenFrom(list: Result[], start: number) {
+    player.playTracks(list.map(toStream), start);
+  }
+
+  function enqueue(result: Result) {
+    player.addToQueue([toStream(result)]);
+    toast({ title: "Añadida a la cola", body: result.title, tone: "ok" });
+  }
+
   async function listen(result: Result, kind: "audio" | "video" = "audio") {
     setBusy(`${kind === "video" ? "watch" : "listen"}:${result.url}`);
     try {
@@ -67,10 +79,13 @@ export default function SearchResults({ query, selected, onOpen, onQuickDownload
 
   const visible = groups.filter((group) => tab === "all" || group.provider === tab);
   const total = groups.reduce((sum, group) => sum + group.results.length, 0);
+  const playable = visible.flatMap((group) => group.results);
+  const playingUrl = player.current?.id.startsWith("listen:") ? player.current.sourceUrl : null;
 
   return <section className="search-panel" aria-label="Resultados de búsqueda">
     <div className="search-head">
       <span className="search-kicker">&gt; {total} resultado(s) para «{query}»</span>
+      {playable.length > 0 && <button type="button" className="chip-button is-accent search-listen-all" onClick={() => listenFrom(playable, 0)} title="Escuchar todos los resultados en streaming, solo audio y sin descargar"><IconHeadphones size={15} /> Escuchar todo</button>}
       {groups.length > 1 && <div className="segmented">
         <button type="button" className={tab === "all" ? "active" : ""} onClick={() => setTab("all")}>Todo</button>
         {groups.map((group) => <button key={group.provider} type="button" className={tab === group.provider ? "active" : ""} onClick={() => setTab(group.provider)}>{group.label} <small>{group.results.length}</small></button>)}
@@ -81,10 +96,10 @@ export default function SearchResults({ query, selected, onOpen, onQuickDownload
       {group.error && <p className="search-error">{group.error}</p>}
       {!group.error && group.results.length === 0 && <p className="search-error">Sin resultados en {group.label}.</p>}
       <ul className="search-list">
-        {group.results.map((result) => <li key={`${group.provider}-${result.url}`} className="search-item">
-          <button type="button" className="search-thumb" onClick={() => void listen(result)} aria-label={`Escuchar ${result.title}`}>
+        {group.results.map((result) => <li key={`${group.provider}-${result.url}`} className={`search-item${playingUrl === result.url ? " is-playing" : ""}`}>
+          <button type="button" className="search-thumb" onClick={() => listenFrom(playable, playable.indexOf(result))} aria-label={`Escuchar ${result.title}`}>
             {result.thumbnailUrl ? <img src={result.thumbnailUrl} alt="" loading="lazy" /> : <span>♫</span>}
-            <span className="search-thumb-play">{busy === `listen:${result.url}` ? <span className="spinner" /> : <IconPlay size={22} />}</span>
+            <span className="search-thumb-play">{playingUrl === result.url && player.loading ? <span className="spinner" /> : <IconPlay size={22} />}</span>
             {result.durationSeconds ? <em>{formatTime(result.durationSeconds)}</em> : null}
           </button>
           <div className="search-copy">
@@ -92,6 +107,8 @@ export default function SearchResults({ query, selected, onOpen, onQuickDownload
             <span>{result.uploader ?? group.label}</span>
           </div>
           <div className="search-actions">
+            <button type="button" className="chip-button" onClick={() => listenFrom(playable, playable.indexOf(result))} title="Escuchar en streaming: solo audio, sin descargar"><IconHeadphones size={15} /> Escuchar</button>
+            <button type="button" className="icon-button search-enqueue" onClick={() => enqueue(result)} aria-label="Añadir a la cola" title="Añadir a la cola (streaming)"><IconPlus size={15} /></button>
             {videoProviders.has(group.provider) && <button type="button" className="chip-button" disabled={busy === `watch:${result.url}`} onClick={() => void listen(result, "video")} title="Ver el vídeo en el reproductor">{busy === `watch:${result.url}` ? <span className="spinner" /> : "▶"} Ver</button>}
             <button type="button" className="chip-button" onClick={() => onOpen(result.url)} title="Ver opciones: formato, calidad y recorte"><IconLink size={15} /> Opciones</button>
             <button type="button" className="chip-button is-accent" disabled={busy === `get:${result.url}`} onClick={() => void quick(result)} title="Añadir a la cola con tus ajustes rápidos"><IconDownload size={15} /> {busy === `get:${result.url}` ? "…" : "Bajar"}</button>

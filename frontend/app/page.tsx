@@ -5,12 +5,12 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import AdvancedOptions, { useDownloadPrefs } from "./DownloadPrefs";
 import BatchPanel from "./BatchPanel";
 import FormatPicker, { type AudioAvailability, type DownloadFormat } from "./FormatPicker";
-import { previewTrack, usePlayer } from "./player/PlayerContext";
+import { previewTrack, streamTrack, usePlayer } from "./player/PlayerContext";
 import { formatTime } from "./player/types";
 import { apiUrl, isDesktop, revealDownload } from "./runtime";
 import SearchResults, { providers, type SearchProvider } from "./SearchResults";
 import { pendingOmniboxKey } from "./shell/omnibox";
-import { IconDownload, IconLink, IconPlay, IconScissors, IconSearch } from "./shell/icons";
+import { IconDownload, IconHeadphones, IconLink, IconPlay, IconScissors, IconSearch } from "./shell/icons";
 import { useToast } from "./shell/Toasts";
 import Trimmer, { type Section } from "./Trimmer";
 
@@ -216,6 +216,15 @@ export default function Home() {
     }
   }
 
+  /** Escucha la playlist pegada en streaming (las elegidas, o todas). */
+  function listenPlaylist() {
+    if (!metadata) return;
+    const tracks = metadata.metadata.playlistEntries
+      .filter((entry) => entry.sourceUrl && (!selectedItems || selectedItems.has(entry.index)))
+      .map((entry) => streamTrack(entry.sourceUrl as string, { title: entry.title, artist: metadata.metadata.uploader, cover: entry.thumbnailUrl, durationSeconds: entry.durationSeconds }));
+    if (tracks.length) player.playTracks(tracks);
+  }
+
   async function quickDownload(item: { url: string; title: string }) {
     try {
       const response = await fetch(`${apiUrl()}/api/download`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: item.url, format: quick.format, quality: quick.format === "mp3" || quick.format === "mp4" ? quick.quality : "best", title: item.title, ...requestFields(quick.format) }) });
@@ -336,7 +345,7 @@ export default function Home() {
           <div className="meta-row"><span>{metadata?.metadata.durationSeconds ? formatTime(metadata.metadata.durationSeconds) : "Duración no disponible"}</span><span>{format === "mp4" ? "Vídeo con audio" : "Solo audio"}</span>{metadata?.metadata.audio?.lossless && <span className="meta-highlight">Fuente sin pérdida</span>}</div>
           <a className="source-link" href={metadata?.metadata.sourceUrl ?? result.analysis.url} target="_blank" rel="noreferrer">Abrir contenido original ↗</a>
         </div>
-        {metadata?.metadata.isPlaylist && <section className="playlist-browser" aria-label="Canciones de la playlist"><div className="playlist-browser-heading"><h3>Contenido de la playlist</h3><span>{selectedItems ? `${selectedItems.size} de ${playlistEntries.length} elegidas` : `${playlistCount ?? playlistEntries.length} elementos`}</span></div>{playlistEntries.length > 0 && <div className="playlist-select-bar"><span>Elige qué descargar:</span><button type="button" onClick={() => setSelectedItems(null)}>Todas</button><button type="button" onClick={() => setSelectedItems(new Set())}>Ninguna</button></div>}{playlistEntries.length > 0 ? <div className="playlist-list">{playlistEntries.map((entry) => { const itemDownloaded = entry.index <= completedPlaylistItems; const itemSelected = !selectedItems || selectedItems.has(entry.index); return <div className={`playlist-item${itemDownloaded ? " is-downloaded" : ""}${itemSelected ? "" : " is-unselected"}`} key={`${entry.index}-${entry.id ?? entry.title}`}><input type="checkbox" className="playlist-item-check" aria-label={`Descargar ${entry.title}`} checked={itemSelected} disabled={isDownloadLoading} onChange={(event) => { const next = new Set(selectedItems ?? playlistEntries.map((item) => item.index)); if (event.target.checked) next.add(entry.index); else next.delete(entry.index); setSelectedItems(next.size === playlistEntries.length ? null : next); }} /><span className="playlist-item-index">{String(entry.index).padStart(2, "0")}</span><div className="playlist-item-copy"><strong>{entry.title}</strong><span>{formatTime(entry.durationSeconds)}</span></div>{entry.sourceUrl && <a href={entry.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Abrir ${entry.title}`}>↗</a>}<span className="playlist-item-status" aria-label={itemDownloaded ? "Descargada" : "Pendiente"}>{itemDownloaded ? "✓" : ""}</span></div>; })}</div> : <p className="playlist-empty">La plataforma ha indicado el número de elementos, pero no ha devuelto sus títulos.</p>}</section>}
+        {metadata?.metadata.isPlaylist && <section className="playlist-browser" aria-label="Canciones de la playlist"><div className="playlist-browser-heading"><h3>Contenido de la playlist</h3><span>{selectedItems ? `${selectedItems.size} de ${playlistEntries.length} elegidas` : `${playlistCount ?? playlistEntries.length} elementos`}</span>{playlistEntries.some((entry) => entry.sourceUrl) && <button type="button" className="chip-button" onClick={listenPlaylist} title="Escuchar en streaming, solo audio y sin descargar"><IconHeadphones size={15} /> Escuchar playlist</button>}</div>{playlistEntries.length > 0 && <div className="playlist-select-bar"><span>Elige qué descargar:</span><button type="button" onClick={() => setSelectedItems(null)}>Todas</button><button type="button" onClick={() => setSelectedItems(new Set())}>Ninguna</button></div>}{playlistEntries.length > 0 ? <div className="playlist-list">{playlistEntries.map((entry) => { const itemDownloaded = entry.index <= completedPlaylistItems; const itemSelected = !selectedItems || selectedItems.has(entry.index); return <div className={`playlist-item${itemDownloaded ? " is-downloaded" : ""}${itemSelected ? "" : " is-unselected"}`} key={`${entry.index}-${entry.id ?? entry.title}`}><input type="checkbox" className="playlist-item-check" aria-label={`Descargar ${entry.title}`} checked={itemSelected} disabled={isDownloadLoading} onChange={(event) => { const next = new Set(selectedItems ?? playlistEntries.map((item) => item.index)); if (event.target.checked) next.add(entry.index); else next.delete(entry.index); setSelectedItems(next.size === playlistEntries.length ? null : next); }} /><span className="playlist-item-index">{String(entry.index).padStart(2, "0")}</span><div className="playlist-item-copy"><strong>{entry.title}</strong><span>{formatTime(entry.durationSeconds)}</span></div>{entry.sourceUrl && <a href={entry.sourceUrl} target="_blank" rel="noreferrer" aria-label={`Abrir ${entry.title}`}>↗</a>}<span className="playlist-item-status" aria-label={itemDownloaded ? "Descargada" : "Pendiente"}>{itemDownloaded ? "✓" : ""}</span></div>; })}</div> : <p className="playlist-empty">La plataforma ha indicado el número de elementos, pero no ha devuelto sus títulos.</p>}</section>}
       </div>
 
       <div className="options-panel">
