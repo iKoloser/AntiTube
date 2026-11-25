@@ -61,6 +61,9 @@ function audioAvailability(value: unknown): AudioAvailability | null {
   const audio = value
     .map((format) => (typeof format === "object" && format !== null ? format as Record<string, unknown> : {}))
     .filter((format) => typeof format.acodec === "string" && format.acodec !== "none" && (format.vcodec === "none" || format.vcodec === undefined || format.vcodec === null));
+  // Enlaces directos sin información de códecs: no se sabe qué hay (se comprueba al descargar).
+  const described = value.some((format) => typeof format === "object" && format !== null && typeof (format as Record<string, unknown>).acodec === "string");
+  if (!described) return null;
   const kbps = (format: Record<string, unknown>) => {
     const rate = nullableNumber(format.abr) ?? nullableNumber(format.tbr);
     return rate ? Math.round(rate) : null;

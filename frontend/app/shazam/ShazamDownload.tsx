@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { apiUrl, isDesktop, revealDownload } from "../runtime";
 
@@ -142,7 +143,7 @@ export default function ShazamDownload({ artist, title }: Readonly<{ artist: str
       <button type="button" className="download-button shazam-get-button" disabled={running} onClick={() => void startDownload()}>{running ? "Descargando…" : `↓ Descargar ${format.toUpperCase()}`}</button>
     </div>}
 
-    {job && running && <div className="progress-box"><div className="progress-top"><strong>{job.progress.message}</strong><b>{Math.round(job.progress.percent)}%</b></div><div className="progress-track"><div style={{ width: `${job.progress.percent}%` }} /></div><p>{job.progress.speed ? `Velocidad: ${job.progress.speed}` : "Preparando…"}{job.progress.eta ? ` / ETA: ${job.progress.eta}` : ""}</p><p className="progress-hint">También puedes seguirla en <a href="/descargas/">Descargas</a>.</p></div>}
+    {job && running && <div className="progress-box"><div className="progress-top"><strong>{job.progress.message}</strong><b>{Math.round(job.progress.percent)}%</b></div><div className="progress-track"><div style={{ width: `${job.progress.percent}%` }} /></div><p>{job.progress.speed ? `Velocidad: ${job.progress.speed}` : "Preparando…"}{job.progress.eta ? ` / ETA: ${job.progress.eta}` : ""}</p><p className="progress-hint">También puedes seguirla en <Link href="/descargas/">Descargas</Link>.</p></div>}
     {file && <div className="shazam-download-result"><strong>Descarga preparada</strong>{isDesktop ? <button type="button" onClick={() => void revealDownload(file.filename)}>Mostrar {file.filename} en la carpeta</button> : <a href={`${apiUrl()}${file.downloadUrl}`} download>Guardar {file.filename} ↓</a>}</div>}
     {preview && error && <div className="notice error" role="alert">ⓘ <span>{error}</span></div>}
   </div>;

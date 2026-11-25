@@ -8,7 +8,8 @@ export type JobSummary = {
   title: string;
   url: string;
   platform: string;
-  format: "mp4" | "mp3";
+  format: "mp4" | "mp3" | "m4a" | "opus" | "flac";
+  section: { start: number; end: number } | null;
   quality: string;
   isPlaylist: boolean;
   createdAt: number;
@@ -24,7 +25,7 @@ export type JobSummary = {
   error?: { error: string; message: string };
 };
 
-type JobsResponse = { jobs: JobSummary[]; active: number };
+type JobsResponse = { jobs: JobSummary[]; active: number; maxConcurrent?: number };
 
 /** Consulta la lista de descargas: rápido mientras hay alguna activa, despacio si no. */
 export function useJobs(intervalActive = 1000, intervalIdle = 4000) {
@@ -57,5 +58,5 @@ export function useJobs(intervalActive = 1000, intervalIdle = 4000) {
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
   }, [refresh, intervalActive, intervalIdle]);
 
-  return { jobs: data?.jobs ?? [], active: data?.active ?? 0, loaded: data !== null, failed, refresh };
+  return { jobs: data?.jobs ?? [], active: data?.active ?? 0, maxConcurrent: data?.maxConcurrent ?? null, loaded: data !== null, failed, refresh };
 }

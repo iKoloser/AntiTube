@@ -1,9 +1,9 @@
 "use client";
 
-import AntiTubeLogo from "../AntiTubeLogo";
-import DownloadsLink from "../DownloadsLink";
+import Link from "next/link";
 import { useJobs, type JobSummary } from "../jobs";
-import LogoutButton from "../LogoutButton";
+import { useState } from "react";
+import { formatTime } from "../player/types";
 import { apiUrl, isDesktop, revealDownload } from "../runtime";
 
 const statusLabel: Record<JobSummary["status"], string> = {
@@ -18,8 +18,11 @@ const statusLabel: Record<JobSummary["status"], string> = {
 const badgeClass: Record<JobSummary["status"], string> = { queued: "pending", downloading: "running", paused: "pending", completed: "done", failed: "error", cancelled: "skipped" };
 
 function qualityLabel(job: JobSummary): string {
-  if (job.format === "mp3") return `MP3 · ${job.quality} kbps`;
-  return job.quality === "best" ? "MP4 · mejor calidad" : `MP4 · hasta ${job.quality}p`;
+  const section = job.section ? ` · recorte ${formatTime(job.section.start)}–${formatTime(job.section.end)}` : "";
+  if (job.format === "mp3") return `MP3 · ${job.quality} kbps${section}`;
+  if (job.format === "m4a" || job.format === "opus") return `${job.format.toUpperCase()} · original${section}`;
+  if (job.format === "flac") return `FLAC · sin pérdida${section}`;
+  return `${job.quality === "best" ? "MP4 · mejor calidad" : `MP4 · hasta ${job.quality}p`}${section}`;
 }
 
 function timeLabel(timestamp: number): string {
@@ -72,7 +75,15 @@ function JobCard({ job, onRemove, onAction }: Readonly<{ job: JobSummary; onRemo
 }
 
 export default function DownloadsPage() {
-  const { jobs, active, loaded, failed, refresh } = useJobs();
+  const { jobs, active, loaded, failed, refresh, maxConcurrent } = useJobs();
+  const [parallel, setParallel] = useState<number | null>(null);
+  const concurrency = parallel ?? maxConcurrent ?? 3;
+
+  async function changeParallel(value: number) {
+    setParallel(value);
+    await fetch(`${apiUrl()}/api/settings/concurrency`, { method: "POST", credentials: "include", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ maxConcurrent: value }) });
+    await refresh();
+  }
   const finished = jobs.filter((job) => job.status === "completed" || job.status === "failed" || job.status === "cancelled").length;
 
   async function remove(jobId: string) {
@@ -91,17 +102,17 @@ export default function DownloadsPage() {
   }
 
   return <>
-    <header className="site-header"><a className="brand" href="/" aria-label="AntiTube, inicio"><AntiTubeLogo /></a><nav className="site-nav" aria-label="Navegación principal"><a className="site-nav-link" href="/">Descargar</a><a className="site-nav-link" href="/shazam/">SHAZAM</a><DownloadsLink /><LogoutButton /></nav></header>
-    <main className="shell jobs-shell">
+    <main className="page jobs-shell">
       <div className="jobs-heading">
-        <div><p className="setup-kicker">Cola de trabajo</p><h1>Descargas</h1><p className="setup-muted">{active > 0 ? `${active} en curso o en cola. Se procesan de una en una; puedes seguir añadiendo más.` : "No hay descargas en curso. Las nuevas aparecerán aquí."}</p></div>
+        <div><p className="setup-kicker">Cola de trabajo</p><h1>Descargas</h1><p className="setup-muted">{active > 0 ? `${active} en curso o en cola. Se bajan ${concurrency === 1 ? "de una en una" : `hasta ${concurrency} a la vez`}; puedes seguir añadiendo más.` : "No hay descargas en curso. Las nuevas aparecerán aquí."}</p></div>
         <div className="jobs-heading-actions">
+          <div className="parallel-picker" role="group" aria-label="Descargas simultáneas"><span>A la vez</span>{[1, 2, 3, 4, 5].map((value) => <button key={value} type="button" className={concurrency === value ? "active" : ""} onClick={() => void changeParallel(value)}>{value}</button>)}</div>
           {isDesktop && <button type="button" className="setup-secondary" onClick={() => void revealDownload()}>Abrir carpeta</button>}
           {finished > 0 && <button type="button" className="setup-secondary" onClick={() => void clearFinished()}>Limpiar terminadas</button>}
         </div>
       </div>
       {failed && <div className="notice error">ⓘ <span>No se puede consultar el estado de las descargas.</span></div>}
-      {loaded && jobs.length === 0 && <div className="empty-state">Todavía no has descargado nada en esta sesión. <a href="/">Pega un enlace</a> para empezar.</div>}
+      {loaded && jobs.length === 0 && <div className="empty-state">Todavía no has descargado nada en esta sesión. <Link href="/">Pega un enlace</Link> para empezar.</div>}
       {jobs.length > 0 && <ul className="job-list">{jobs.map((job) => <JobCard key={job.jobId} job={job} onRemove={(jobId) => void remove(jobId)} onAction={(jobId, action) => void act(jobId, action)} />)}</ul>}
     </main>
   </>;

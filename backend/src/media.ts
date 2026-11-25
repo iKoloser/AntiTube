@@ -70,8 +70,8 @@ type YtDlpFormat = { url?: string; protocol?: string; http_headers?: Record<stri
  */
 async function resolvePreview(url: string, kind: "audio" | "video", timeoutMs: number) {
   const selector = kind === "video"
-    ? "best[vcodec!=none][acodec!=none][height<=720][protocol^=http][ext=mp4]/best[vcodec!=none][acodec!=none][protocol^=http]/bestaudio[protocol^=http]"
-    : "bestaudio[ext=m4a][protocol^=http]/bestaudio[acodec=opus][protocol^=http]/bestaudio[protocol^=http]/best[protocol^=http]";
+    ? "best[vcodec!=none][acodec!=none][height<=720][protocol^=http][ext=mp4]/best[vcodec!=none][acodec!=none][protocol^=http]/bestaudio[protocol^=http]/best[protocol^=http]/best"
+    : "bestaudio[ext=m4a][protocol^=http]/bestaudio[acodec=opus][protocol^=http]/bestaudio[protocol^=http]/best[protocol^=http]/best";
   const { stdout } = await execFileAsync(process.env.YTDLP_BIN ?? "yt-dlp", [
     "--no-playlist", "--skip-download", "--dump-single-json", "--no-warnings",
     "--js-runtimes", process.env.YTDLP_JS_RUNTIME?.trim() || "node",
@@ -82,7 +82,7 @@ async function resolvePreview(url: string, kind: "audio" | "video", timeoutMs: n
   if (!chosen.url || (chosen.protocol && !chosen.protocol.startsWith("http"))) return null;
   return {
     source: { url: chosen.url, headers: chosen.http_headers ?? info.http_headers ?? {} },
-    hasVideo: Boolean(chosen.vcodec && chosen.vcodec !== "none"),
+    hasVideo: chosen.vcodec ? chosen.vcodec !== "none" : kind === "video" && !/^(m4a|mp3|opus|ogg|oga|flac|wav|aac|weba)$/i.test(chosen.ext ?? ""),
     duration: typeof info.duration === "number" ? info.duration : null,
     title: info.title ?? null,
     thumbnailUrl: info.thumbnail ?? null

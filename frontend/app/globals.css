@@ -1786,25 +1786,6 @@ button:active:not(:disabled) {
   line-height: 1.45;
 }
 
-/* Footer */
-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  margin-top: var(--space-7);
-  padding-top: var(--space-5);
-  border-top: 1px solid var(--border);
-  color: var(--fg-muted);
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-footer > span:first-child {
-  color: var(--fg-secondary);
-  font-weight: 500;
-}
-
 /* Screen reader only */
 .sr-only {
   position: absolute;

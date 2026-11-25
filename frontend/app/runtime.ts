@@ -37,3 +37,60 @@ export async function installUpdate(path: string): Promise<void> {
   if (!internals?.invoke) throw new Error("La actualización automática solo funciona en la app de escritorio.");
   await internals.invoke("install_update", { path });
 }
+
+type TauriEventInternals = TauriInternals & { transformCallback?: (callback: (event: { payload: unknown }) => void, once?: boolean) => number };
+
+function tauriInternals(): TauriEventInternals | null {
+  if (typeof window === "undefined") return null;
+  const internals = (window as unknown as { __TAURI_INTERNALS__?: TauriEventInternals }).__TAURI_INTERNALS__;
+  return internals?.invoke && internals.transformCallback ? internals : null;
+}
+
+/** Escucha un evento de Tauri (p. ej. archivos arrastrados a la ventana). Devuelve una función para dejar de escuchar. */
+export async function listenTauri<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
+  const internals = tauriInternals();
+  if (!internals) return () => undefined;
+  const callbackId = internals.transformCallback!((message) => handler(message.payload as T));
+  const eventId = await internals.invoke("plugin:event|listen", { event, target: { kind: "Any" }, handler: callbackId }) as number;
+  return () => { void internals.invoke("plugin:event|unlisten", { event, eventId }).catch(() => undefined); };
+}
+
+/** Indica a la app si al cerrar la ventana debe quedarse en la bandeja. */
+export async function setCloseToTray(enabled: boolean): Promise<void> {
+  await tauriInternals()?.invoke("set_close_to_tray", { enabled }).catch(() => undefined);
+}
+
+export async function quitApp(): Promise<void> {
+  await tauriInternals()?.invoke("quit_app").catch(() => undefined);
+}
+
+/** Abre el selector de archivos de audio nativo (solo escritorio). */
+export async function pickMediaFiles(): Promise<string[] | undefined> {
+  const internals = tauriInternals();
+  if (!internals) return undefined;
+  const result = await internals.invoke("plugin:dialog|open", { options: { multiple: true, directory: false, title: "Añadir música a la biblioteca", filters: [{ name: "Audio y vídeo", extensions: ["mp3", "m4a", "m4b", "aac", "opus", "ogg", "oga", "flac", "wav", "weba", "aiff", "aif", "wma", "ape", "wv", "mka", "ac3", "dts", "mp2", "mpc", "tta", "caf", "dsf", "mp4", "m4v", "mkv", "webm", "mov"] }] } });
+  if (Array.isArray(result)) return result.filter((item): item is string => typeof item === "string");
+  return typeof result === "string" ? [result] : [];
+}
+
+/** Abre el selector de carpetas para añadir una carpeta de música. */
+export async function pickMusicFolder(): Promise<string | null | undefined> {
+  const internals = tauriInternals();
+  if (!internals) return undefined;
+  const result = await internals.invoke("plugin:dialog|open", { options: { directory: true, multiple: false, title: "Añadir una carpeta de música" } });
+  return typeof result === "string" ? result : null;
+}
+
+/** Petición JSON al motor local. */
+export async function api<T>(path: string, init?: { method?: string; body?: unknown; signal?: AbortSignal }): Promise<T> {
+  const response = await fetch(`${apiUrl()}${path}`, {
+    method: init?.method ?? (init?.body !== undefined ? "POST" : "GET"),
+    credentials: "include",
+    headers: init?.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+    body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
+    signal: init?.signal
+  });
+  const data = await response.json().catch(() => ({})) as T & { message?: string };
+  if (!response.ok) throw new Error(data.message ?? `Error ${response.status}`);
+  return data;
+}

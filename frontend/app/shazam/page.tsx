@@ -1,10 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import AntiTubeLogo from "../AntiTubeLogo";
 import { apiUrl } from "../runtime";
-import DownloadsLink from "../DownloadsLink";
-import LogoutButton from "../LogoutButton";
 import ShazamDownload from "./ShazamDownload";
 import ShazamHistory from "./ShazamHistory";
 
@@ -137,8 +134,7 @@ export default function ShazamPage() {
   useEffect(() => () => { clearTimers(); recorderRef.current?.stream.getTracks().forEach((track) => track.stop()); }, []);
 
   return <>
-    <header className="site-header"><a className="brand" href="/" aria-label="AntiTube, inicio"><AntiTubeLogo /></a><nav className="site-nav" aria-label="Navegación principal"><a className="site-nav-link" href="/">Descargar</a><a className="site-nav-link active" href="/shazam/">SHAZAM</a><DownloadsLink /><LogoutButton /></nav></header>
-    <main className="shell shazam-shell">
+    <main className="page shazam-shell">
       <section className="shazam-hero"><p className="shazam-kicker">Identificación de audio</p><h1>SHAZAM</h1><p>Graba hasta {captureSeconds} segundos del audio de una pestaña y encuentra la canción.</p></section>
       <section className="shazam-capture" aria-labelledby="shazam-capture-title"><div className="shazam-capture-copy"><h2 id="shazam-capture-title">Escucha lo que está sonando</h2><p>Al pulsar el botón, comparte la pestaña que reproduce el audio y activa <strong>Compartir audio</strong>. El fragmento se envía a ShazamIO para reconocerlo y se elimina del backend después.</p><div className="shazam-actions"><button className="download-button shazam-record-button" type="button" disabled={isRecognizing} onClick={isRecording ? stopRecording : startRecording}>{isRecording ? `Detener y reconocer · ${seconds}/${captureSeconds}s` : isRecognizing ? "Reconociendo…" : "Grabar audio de la pestaña"}</button>{isRecording && <span className="shazam-live-status" role="status">Grabando ahora</span>}</div></div><div className={`shazam-signal${isRecording ? " is-active" : ""}`} aria-hidden="true"><span /><span /><span /><span /><span /></div></section>
       {error && <div className="notice error" role="alert">ⓘ <span>{error}</span></div>}

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { apiUrl, installUpdate, isDesktop } from "../runtime";
 
@@ -131,7 +132,7 @@ export function AppUpdateBanner() {
   const version = status.latest.version;
   return <div className="app-update-banner" role="status">
     <span><strong>AntiTube {version}</strong> está disponible.</span>
-    <a href="/herramientas/">Actualizar</a>
+    <Link href="/herramientas/">Actualizar</Link>
     <button type="button" aria-label="Ocultar aviso" onClick={() => { sessionStorage.setItem("antitube-update-dismissed", version); setDismissed(true); }}>×</button>
   </div>;
 }

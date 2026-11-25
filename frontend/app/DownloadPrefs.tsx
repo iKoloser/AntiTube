@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import type { DownloadFormat } from "./FormatPicker";
 
 /** Preferencias de descarga compartidas: plantilla de nombre, duplicados y etiquetas ID3. */
 
@@ -41,9 +42,9 @@ export function useDownloadPrefs() {
   }
 
   /** Campos que se envían al backend junto a la descarga. */
-  function requestFields(format: "mp4" | "mp3") {
+  function requestFields(format: DownloadFormat) {
     const id3 = Object.values(prefs.id3).some((value) => value.trim()) ? prefs.id3 : null;
-    return { filenameTemplate: prefs.filenameTemplate, skipDuplicates: prefs.skipDuplicates, id3: format === "mp3" ? id3 : null };
+    return { filenameTemplate: prefs.filenameTemplate, skipDuplicates: prefs.skipDuplicates, id3: format !== "mp4" ? id3 : null };
   }
 
   return { prefs, update, requestFields };
@@ -55,12 +56,12 @@ function previewName(template: string, format: string): string {
   return /\.[a-z0-9]+$/i.test(name) ? name : `${name}.${format}`;
 }
 
-export default function AdvancedOptions({ prefs, update, format, isPlaylist }: Readonly<{ prefs: DownloadPrefs; update: (patch: Partial<DownloadPrefs>) => void; format: "mp4" | "mp3"; isPlaylist: boolean }>) {
+export default function AdvancedOptions({ prefs, update, format, isPlaylist }: Readonly<{ prefs: DownloadPrefs; update: (patch: Partial<DownloadPrefs>) => void; format: DownloadFormat; isPlaylist: boolean }>) {
   const preset = templatePresets.find((item) => item.value === prefs.filenameTemplate)?.value ?? "custom";
   const setId3 = (key: keyof Id3, value: string) => update({ id3: { ...prefs.id3, [key]: value } });
 
   return <details className="advanced-options">
-    <summary><span>Opciones avanzadas</span><small>Nombre del archivo, duplicados{format === "mp3" ? " y etiquetas ID3" : ""}</small></summary>
+    <summary><span>Opciones avanzadas</span><small>Nombre del archivo, duplicados{format !== "mp4" ? " y etiquetas" : ""}</small></summary>
     <div className="advanced-grid">
       <label className="advanced-field advanced-wide">
         <span>Plantilla de nombre</span>
@@ -74,8 +75,8 @@ export default function AdvancedOptions({ prefs, update, format, isPlaylist }: R
         <input type="checkbox" checked={prefs.skipDuplicates} onChange={(event) => update({ skipDuplicates: event.target.checked })} />
         <span>{isPlaylist ? "Descargar solo las que faltan" : "Omitir si ya lo descargaste"} <small>(AntiTube recuerda lo que has descargado en cada formato)</small></span>
       </label>
-      {format === "mp3" && <>
-        <p className="advanced-note advanced-wide">Etiquetas ID3: AntiTube ya guarda título, artista, fecha y portada cuando la plataforma los da. Rellena lo que quieras cambiar.</p>
+      {format !== "mp4" && <>
+        <p className="advanced-note advanced-wide">Etiquetas: AntiTube ya guarda título, artista, fecha y portada cuando la plataforma los da. Rellena lo que quieras cambiar.</p>
         <label className="advanced-field"><span>Artista</span><input type="text" value={prefs.id3.artist} onChange={(event) => setId3("artist", event.target.value)} placeholder="Automático" /></label>
         <label className="advanced-field"><span>Álbum</span><input type="text" value={prefs.id3.album} onChange={(event) => setId3("album", event.target.value)} placeholder={isPlaylist ? "Nombre de la playlist" : "Automático"} /></label>
         <label className="advanced-field"><span>Año</span><input type="text" inputMode="numeric" maxLength={4} value={prefs.id3.year} onChange={(event) => setId3("year", event.target.value.replace(/\D/g, ""))} placeholder="Automático" /></label>

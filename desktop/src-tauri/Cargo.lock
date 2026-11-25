@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "antitube"
-version = "0.2.1"
+version = "1.0.0-beta.1"
 dependencies = [
  "dunce",
  "serde_json",

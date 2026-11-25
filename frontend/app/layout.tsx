@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./shell.css";
 import FuturisticBackground from "./FuturisticBackground";
 import AuthGate from "./AuthGate";
+import AppShell from "./shell/AppShell";
 
 export const metadata: Metadata = {
   title: "AntiTube",
-  description: "Herramienta local de análisis de contenido multimedia educativo"
+  description: "Busca, descarga y reproduce tu música y vídeo en local"
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
@@ -13,7 +15,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="es">
       <body>
         <FuturisticBackground />
-        <AuthGate>{children}</AuthGate>
+        <AuthGate><AppShell>{children}</AppShell></AuthGate>
       </body>
     </html>
   );
