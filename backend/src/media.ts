@@ -4,6 +4,7 @@ import http, { type IncomingMessage } from "node:http";
 import https from "node:https";
 import { promisify } from "node:util";
 import { Router, type Request, type Response } from "express";
+import { soundcloudDirect, youtubeDirect } from "./direct.js";
 import { ExtractorLookupError, ExtractorUnavailableError, getMediaMetadata } from "./extractor.js";
 
 /**
@@ -187,7 +188,7 @@ export async function searchMedia(provider: SearchProvider, query: string, limit
 }
 
 /** `fallback`: URL original para reintentar por tubería (yt-dlp + FFmpeg) si la directa falla. */
-type PreviewSource = { url: string; headers: Record<string, string>; expires: number; fallback?: string; hls?: { duration: number | null } };
+type PreviewSource = { url: string; headers: Record<string, string>; expires: number; fallback?: string; hls?: { duration: number | null }; direct?: boolean };
 const previews = new Map<string, PreviewSource>();
 
 function prunePreviews(): void {
@@ -281,7 +282,28 @@ const isYouTube = (url: string) => /(^|\.)(youtube\.com|youtu\.be|youtube-nocook
  * (el paso lento). Si no vale para ese vídeo (edad, música infantil…), se
  * hace la búsqueda completa de siempre.
  */
+// Canciones en las que la vía directa falló: van siempre por yt-dlp.
+const directFailed = new Set<string>();
+
 async function resolveListen(url: string, timeoutMs: number) {
+  const started = Date.now();
+  if (!directFailed.has(url)) {
+    try {
+      const direct = await youtubeDirect(url) ?? await soundcloudDirect(url);
+      if (direct) {
+        console.log(`[listen] vía directa en ${Date.now() - started} ms`);
+        return { duration: direct.duration, title: direct.title, thumbnailUrl: null, source: { url: direct.url, headers: direct.headers, direct: true, ...(direct.hls ? { hls: { duration: direct.duration } } : {}) }, audio: null, hasVideo: false };
+      }
+    } catch (error) {
+      console.error(`[listen] la vía directa falló: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const viaYtDlp = await resolveWithYtDlp(url, timeoutMs);
+  console.log(`[listen] yt-dlp en ${Date.now() - started} ms`);
+  return viaYtDlp;
+}
+
+async function resolveWithYtDlp(url: string, timeoutMs: number) {
   if (isYouTube(url)) {
     try {
       const quick = await resolvePreview(url, "audio", Math.min(timeoutMs, 15_000), ["--extractor-args", "youtube:player_client=android_vr", "--socket-timeout", "8"]);
@@ -301,7 +323,8 @@ async function listenToken(url: string, timeoutMs: number): Promise<string> {
     if (!resolved) throw new Error("Sin audio directo");
     prunePreviews();
     const token = randomUUID();
-    const expires = Date.now() + listenLifetimeMs;
+    // Los HLS de SoundCloud caducan pronto; los enlaces de YouTube duran horas.
+    const expires = Date.now() + (resolved.source.hls ? 15 * 60 * 1000 : listenLifetimeMs);
     previews.set(token, { ...resolved.source, expires: expires + 60 * 60 * 1000, fallback: url });
     listenCache.set(url, { token, expires });
     if (listenCache.size > 500) listenCache.delete(listenCache.keys().next().value as string);
@@ -353,6 +376,14 @@ function streamHls(source: PreviewSource, request: Request, response: Response):
   });
   ffmpeg.on("close", (code) => {
     if (code && sent === 0) console.error(`[listen] FFmpeg no pudo leer el HLS: ${errors.trim().split("\n").at(-1) ?? code}`);
+    if (code && sent === 0 && !response.headersSent && source.fallback) {
+      // Enlace caducado o rechazado: se vuelve a pedir, ahora con yt-dlp.
+      if (source.direct) directFailed.add(source.fallback);
+      forgetListen(source.fallback);
+      for (const name of ["Content-Length", "Content-Range", "Content-Type", "Accept-Ranges"]) response.removeHeader(name);
+      response.redirect(302, source.direct ? `/api/listen?url=${encodeURIComponent(source.fallback)}` : pipeUrl(source.fallback));
+      return;
+    }
     if (response.writableEnded) return;
     // Si el MP3 sale algo más corto de lo calculado, se rellena con silencio
     // para que el reproductor no se quede esperando bytes que no llegan.
@@ -512,11 +543,16 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
       console.error(`[preview] ${reason}`);
       if (response.headersSent) { response.destroy(); return; }
       if (source.fallback && !closed) {
-        // La plataforma rechaza la URL directa (403, caducada, sin conexión…):
-        // la próxima vez se vuelve a resolver y ahora se escucha por tubería.
         forgetListen(source.fallback);
         previews.delete(String(request.params.token));
-        response.redirect(302, pipeUrl(source.fallback));
+        // Si venía de la vía directa, se prueba con yt-dlp; si ya era de yt-dlp,
+        // la plataforma rechaza la URL (403, caducada…) y se escucha por tubería.
+        if (source.direct) {
+          directFailed.add(source.fallback);
+          response.redirect(302, `/api/listen?url=${encodeURIComponent(source.fallback)}`);
+        } else {
+          response.redirect(302, pipeUrl(source.fallback));
+        }
         return;
       }
       response.status(502).json({ error: "Vista previa no disponible", message: "La plataforma no ha respondido." });

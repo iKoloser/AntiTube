@@ -15,7 +15,7 @@ async function text(url: string): Promise<string> {
 }
 
 /** El client_id va dentro de uno de los scripts de soundcloud.com. */
-async function soundcloudClientId(refresh = false): Promise<string> {
+export async function soundcloudClientId(refresh = false): Promise<string> {
   if (!refresh && clientId && clientId.expires > Date.now()) return clientId.value;
   const page = await text("https://soundcloud.com/");
   const scripts = [...page.matchAll(/<script[^>]+src="([^"]+)"/g)].map((match) => match[1]).reverse();
