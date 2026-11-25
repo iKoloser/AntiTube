@@ -7,15 +7,20 @@ import { api } from "./runtime";
 import { IconDownload, IconLink, IconPlay } from "./shell/icons";
 import { useToast } from "./shell/Toasts";
 
-export type SearchProvider = "youtube" | "ytmusic" | "soundcloud";
+export type SearchProvider = "youtube" | "ytmusic" | "soundcloud" | "bandcamp" | "audius";
 type Result = { provider: SearchProvider; id: string | null; title: string; uploader: string | null; durationSeconds: number | null; thumbnailUrl: string | null; url: string };
 type Group = { provider: SearchProvider; label: string; results: Result[]; error: string | null };
 
 export const providers: Array<{ id: SearchProvider; label: string; mark: string }> = [
   { id: "youtube", label: "YouTube", mark: "YT" },
   { id: "ytmusic", label: "YouTube Music", mark: "YM" },
+  { id: "bandcamp", label: "Bandcamp", mark: "BC" },
+  { id: "audius", label: "Audius", mark: "AU" },
   { id: "soundcloud", label: "SoundCloud", mark: "SC" }
 ];
+
+/** Plataformas donde tiene sentido ver la imagen además de escuchar. */
+const videoProviders = new Set<SearchProvider>(["youtube"]);
 
 /**
  * Resultados de búsqueda de varias plataformas a la vez. Cada resultado se
@@ -40,10 +45,10 @@ export default function SearchResults({ query, selected, onOpen, onQuickDownload
     return () => controller.abort();
   }, [query, selected]);
 
-  async function listen(result: Result) {
-    setBusy(`listen:${result.url}`);
+  async function listen(result: Result, kind: "audio" | "video" = "audio") {
+    setBusy(`${kind === "video" ? "watch" : "listen"}:${result.url}`);
     try {
-      const track = await previewTrack(result.url, { title: result.title, artist: result.uploader, cover: result.thumbnailUrl, durationSeconds: result.durationSeconds });
+      const track = await previewTrack(result.url, { title: result.title, artist: result.uploader, cover: result.thumbnailUrl, durationSeconds: result.durationSeconds }, kind);
       player.playTracks([track]);
     } catch (caught) {
       toast({ title: "No se puede escuchar", body: caught instanceof Error ? caught.message : undefined, tone: "error" });
@@ -87,6 +92,7 @@ export default function SearchResults({ query, selected, onOpen, onQuickDownload
             <span>{result.uploader ?? group.label}</span>
           </div>
           <div className="search-actions">
+            {videoProviders.has(group.provider) && <button type="button" className="chip-button" disabled={busy === `watch:${result.url}`} onClick={() => void listen(result, "video")} title="Ver el vídeo en el reproductor">{busy === `watch:${result.url}` ? <span className="spinner" /> : "▶"} Ver</button>}
             <button type="button" className="chip-button" onClick={() => onOpen(result.url)} title="Ver opciones: formato, calidad y recorte"><IconLink size={15} /> Opciones</button>
             <button type="button" className="chip-button is-accent" disabled={busy === `get:${result.url}`} onClick={() => void quick(result)} title="Añadir a la cola con tus ajustes rápidos"><IconDownload size={15} /> {busy === `get:${result.url}` ? "…" : "Bajar"}</button>
           </div>

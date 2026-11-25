@@ -243,22 +243,55 @@ async function allowedTrack(id: string): Promise<CachedTrack | null> {
 const transcoding = new Map<string, Promise<string>>();
 
 /** Descodifica a FLAC (sin pérdida) los formatos que el WebView no reproduce. */
+function runFfmpeg(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.env.FFMPEG_BIN ?? "ffmpeg", ["-nostdin", "-hide_banner", ...args], { windowsHide: true });
+    let errorOutput = "";
+    child.stderr.on("data", (chunk: Buffer) => { errorOutput += chunk.toString(); });
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolve(errorOutput) : reject(Object.assign(new Error(errorOutput.trim().split(/\r?\n/).slice(-2).join(" ") || "FFmpeg no pudo preparar el archivo."), { output: errorOutput }))));
+  });
+}
+
+/** Códecs de vídeo y audio que el WebView reproduce dentro de un MP4. */
+async function probeCodecs(filePath: string): Promise<{ video: string | null; audio: string | null }> {
+  // «ffmpeg -i» sin salida termina con error, pero antes describe las pistas.
+  const output = await runFfmpeg(["-i", filePath]).catch((error: { output?: string }) => error.output ?? "");
+  return {
+    video: output.match(/Stream #\d+:\d+[^:]*: Video: (\w+)/)?.[1]?.toLowerCase() ?? null,
+    audio: output.match(/Stream #\d+:\d+[^:]*: Audio: (\w+)/)?.[1]?.toLowerCase() ?? null
+  };
+}
+
+/**
+ * Copia reproducible de un archivo que el WebView no abre: el audio pasa a FLAC
+ * sin pérdida; el vídeo se reempaqueta en MP4 sin recomprimir si el códec lo
+ * permite (H.264, VP9, AV1) y solo se convierte cuando no hay otra opción.
+ */
 async function playableCopy(track: CachedTrack): Promise<string> {
   const key = createHash("sha1").update(`${track.path}|${track.modified}|${track.size}`).digest("hex");
-  const target = path.join(cacheDirectory(), `${key}.flac`);
+  const extension = track.kind === "video" ? "mp4" : "flac";
+  const target = path.join(cacheDirectory(), `${key}.${extension}`);
   if (existsSync(target)) return target;
   const pending = transcoding.get(key);
   if (pending) return pending;
   const job = (async () => {
     await mkdir(cacheDirectory(), { recursive: true });
-    const temporary = `${target}.part.flac`;
-    await new Promise<void>((resolve, reject) => {
-      const child = spawn(process.env.FFMPEG_BIN ?? "ffmpeg", ["-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", track.path, "-map", "0:a:0", "-vn", "-c:a", "flac", temporary], { windowsHide: true });
-      let errorOutput = "";
-      child.stderr.on("data", (chunk: Buffer) => { errorOutput += chunk.toString(); });
-      child.on("error", reject);
-      child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(errorOutput.trim() || "FFmpeg no pudo preparar el archivo."))));
-    });
+    const temporary = `${target}.part.${extension}`;
+    if (track.kind === "video") {
+      const codecs = await probeCodecs(track.path);
+      const copyVideo = codecs.video !== null && /^(h264|vp9|av1)$/.test(codecs.video);
+      const copyAudio = codecs.audio !== null && /^(aac|mp3|opus|flac)$/.test(codecs.audio);
+      await runFfmpeg([
+        "-loglevel", "error", "-y", "-i", track.path,
+        "-map", "0:v:0", "-map", "0:a:0?", "-sn", "-dn",
+        ...(copyVideo ? ["-c:v", "copy"] : ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p"]),
+        ...(copyAudio ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "256k"]),
+        "-movflags", "+faststart", temporary
+      ]);
+    } else {
+      await runFfmpeg(["-loglevel", "error", "-y", "-i", track.path, "-map", "0:a:0", "-vn", "-c:a", "flac", temporary]);
+    }
     await rename(temporary, target);
     return target;
   })().finally(() => transcoding.delete(key));
@@ -367,8 +400,25 @@ export function createLibraryRouter(deps: { reveal: (filePath: string) => void }
 
   router.get("/api/library/cover/:id", async (request: Request, response: Response) => {
     const track = await allowedTrack(String(request.params.id));
-    if (!track?.hasCover) {
+    if (!track || (!track.hasCover && track.kind !== "video")) {
       response.status(404).end();
+      return;
+    }
+    if (!track.hasCover) {
+      // Vídeo sin carátula: se usa un fotograma como miniatura.
+      try {
+        const key = createHash("sha1").update(`${track.path}|${track.modified}|${track.size}`).digest("hex");
+        const target = path.join(cacheDirectory(), `${key}.jpg`);
+        if (!existsSync(target)) {
+          await mkdir(cacheDirectory(), { recursive: true });
+          const at = track.durationSeconds ? Math.min(30, track.durationSeconds * 0.15) : 3;
+          await runFfmpeg(["-loglevel", "error", "-y", "-ss", at.toFixed(1), "-i", track.path, "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", target])
+            .catch(() => runFfmpeg(["-loglevel", "error", "-y", "-i", track.path, "-frames:v", "1", "-vf", "scale=480:-2", "-q:v", "4", target]));
+        }
+        response.sendFile(target, { headers: { "Cache-Control": "max-age=86400" }, dotfiles: "allow" });
+      } catch {
+        response.status(404).end();
+      }
       return;
     }
     try {

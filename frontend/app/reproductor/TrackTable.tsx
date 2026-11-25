@@ -122,7 +122,7 @@ export default function TrackTable({ tracks, playlistId, sort, onSort, onPlay, o
               <span className="track-title-copy"><strong title={track.title}>{track.title}</strong><small>{track.artist ?? track.albumArtist ?? "Artista desconocido"}</small></span>
             </span>
             <span className="track-col-album" title={track.album ?? ""}>{track.album ?? "—"}</span>
-            <span className="track-col-format"><em className={`format-chip${track.lossless ? " is-lossless" : ""}`}>{formatLabel(track)}</em></span>
+            <span className="track-col-format">{track.kind === "video" && <em className="format-chip is-video">VÍDEO</em>}<em className={`format-chip${track.lossless ? " is-lossless" : ""}`}>{formatLabel(track)}</em></span>
             <span className="track-col-duration">{formatTime(track.durationSeconds)}</span>
             <span className="track-col-actions"><button type="button" className="icon-button" onClick={(event) => { event.stopPropagation(); const rect = event.currentTarget.getBoundingClientRect(); menu(index, rect.left, rect.bottom); }} aria-label="Más opciones"><IconMore size={18} /></button></span>
           </div>;

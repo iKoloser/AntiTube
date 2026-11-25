@@ -22,7 +22,7 @@ type VideoQuality = "best" | "360" | "480" | "720" | "1080";
 type AudioQuality = "128" | "192" | "256" | "320";
 
 const quickKey = "antitube-quick-download";
-const providersKey = "antitube-search-providers";
+const providersKey = "antitube-search-providers-v2";
 
 const supportedPlatforms = [
   { name: "YouTube", mark: "YT", detail: "vídeo, audio y playlists" },
@@ -67,7 +67,7 @@ export default function Home() {
   const [input, setInput] = useState("");
   const [url, setUrl] = useState("");
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
-  const [searchProviders, setSearchProviders] = useState<SearchProvider[]>(["youtube", "soundcloud"]);
+  const [searchProviders, setSearchProviders] = useState<SearchProvider[]>(["youtube", "ytmusic", "bandcamp", "audius"]);
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [metadata, setMetadata] = useState<MetadataResponse | null>(null);
   const [error, setError] = useState<string | null>(null);

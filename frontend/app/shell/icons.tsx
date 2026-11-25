@@ -38,3 +38,8 @@ export const IconHeadphones = (props: IconProps) => <Svg {...props}><path d="M3 
 export const IconDisc = (props: IconProps) => <Svg {...props}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2" /><path d="M16.5 7.5a6 6 0 0 1 1.5 4.5" /></Svg>;
 export const IconCheck = (props: IconProps) => <Svg {...props}><path d="m5 12 5 5L20 7" /></Svg>;
 export const IconRefresh = (props: IconProps) => <Svg {...props}><path d="M21 12a9 9 0 1 1-2.6-6.4L21 8" /><path d="M21 3v5h-5" /></Svg>;
+export const IconVideo = (props: IconProps) => <Svg {...props}><rect x="2.5" y="5" width="14" height="14" rx="2" /><path d="m16.5 10 5-3v10l-5-3z" /></Svg>;
+export const IconFullscreen = (props: IconProps) => <Svg {...props}><path d="M3 9V3h6" /><path d="M21 9V3h-6" /><path d="M3 15v6h6" /><path d="M21 15v6h-6" /></Svg>;
+export const IconFullscreenExit = (props: IconProps) => <Svg {...props}><path d="M9 3v6H3" /><path d="M15 3v6h6" /><path d="M9 21v-6H3" /><path d="M15 21v-6h6" /></Svg>;
+export const IconPip = (props: IconProps) => <Svg {...props}><rect x="2.5" y="4" width="19" height="16" rx="2" /><rect x="12" y="12" width="7" height="5" rx="1" fill="currentColor" stroke="none" /></Svg>;
+export const IconCinema = (props: IconProps) => <Svg {...props}><rect x="2.5" y="6" width="19" height="12" rx="2" /><path d="M2.5 9.5h19" /><path d="M2.5 14.5h19" /></Svg>;

@@ -56,7 +56,7 @@ export function toPlayerTrack(track: LibraryTrack): PlayerTrack {
     artist: track.artist ?? track.albumArtist,
     album: track.album,
     durationSeconds: track.durationSeconds,
-    cover: track.hasCover ? `/api/library/cover/${track.id}` : null,
+    cover: track.hasCover || track.kind === "video" ? `/api/library/cover/${track.id}` : null,
     src: `/api/library/stream/${track.id}`,
     kind: track.kind,
     format: formatLabel(track),

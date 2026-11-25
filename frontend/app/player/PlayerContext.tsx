@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { api, apiUrl } from "../runtime";
 import { absolute, type LibraryTrack, type PlayerTrack, type Playlist } from "./types";
@@ -38,7 +39,9 @@ type PlayerState = {
   settings: Settings;
   sleepAt: number | null;
   analyser: AnalyserNode | null;
-  media: HTMLAudioElement | null;
+  media: HTMLVideoElement | null;
+  /** true mientras una pantalla de vídeo (p. ej. la del reproductor) muestra la imagen. */
+  videoDocked: boolean;
   library: { tracks: LibraryTrack[]; loaded: boolean; scanning: { done: number; total: number } | null; folders: string[]; extraFolders: string[] };
   playlists: Playlist[];
 };
@@ -68,6 +71,8 @@ type PlayerActions = {
   setSleep: (minutes: number | null) => void;
   refreshLibrary: (force?: boolean) => Promise<LibraryTrack[]>;
   setPlaylists: (playlists: Playlist[]) => void;
+  /** Muestra la imagen del vídeo dentro de `container`; con null vuelve a la ventanita flotante. */
+  dockVideo: (container: HTMLElement | null) => void;
 };
 
 const PlayerContext = createContext<(PlayerState & PlayerActions) | null>(null);
@@ -88,7 +93,10 @@ function shuffled<T>(items: T[]): T[] {
 }
 
 export function PlayerProvider({ children }: Readonly<{ children: React.ReactNode }>) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLVideoElement | null>(null);
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const [videoDocked, setVideoDocked] = useState(false);
+  const [miniClosed, setMiniClosed] = useState(false);
   const graphRef = useRef<{ context: AudioContext; filters: BiquadFilterNode[]; preamp: GainNode; analyser: AnalyserNode } | null>(null);
   const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
   const [queue, setQueue] = useState<PlayerTrack[]>([]);
@@ -113,9 +121,15 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
 
   // ── Elemento de audio único para toda la app ──
   useEffect(() => {
-    const audio = new Audio();
+    // Un <video> sirve para todo: suena igual que un <audio> y además puede mostrar imagen.
+    // Siempre está dentro del documento (si se sacara, el navegador lo pausaría).
+    const audio = document.createElement("video");
     audio.preload = "auto";
     audio.crossOrigin = "use-credentials";
+    audio.playsInline = true;
+    audio.disablePictureInPicture = false;
+    audio.className = "player-video";
+    hostRef.current?.appendChild(audio);
     audioRef.current = audio;
     try {
       const saved = JSON.parse(localStorage.getItem(storageKey) ?? "null") as Saved | null;
@@ -131,7 +145,7 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
         if (restoredIndex >= 0) restoredRef.current = { position: saved.position ?? 0 };
       }
     } catch { /* sin estado guardado */ }
-    return () => { audio.pause(); audio.src = ""; };
+    return () => { audio.pause(); audio.src = ""; audio.remove(); };
   }, []);
 
   // Guardar el estado (cola, posición y ajustes) para el próximo arranque.
@@ -511,8 +525,19 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
     if ("mediaSession" in navigator) navigator.mediaSession.playbackState = playing ? "playing" : "paused";
   }, [playing]);
 
+  const dockVideo = useCallback((container: HTMLElement | null) => {
+    const video = audioRef.current;
+    if (!video) return;
+    // appendChild mueve el elemento sin sacarlo del documento: la reproducción no se corta.
+    if (container) container.appendChild(video);
+    else hostRef.current?.appendChild(video);
+    setVideoDocked(Boolean(container));
+  }, []);
+
+  useEffect(() => { setMiniClosed(false); }, [current?.id]);
+
   const value = useMemo(() => ({
-    queue, index, current, playing, loading, error, time, duration, buffered, settings, sleepAt, analyser, media: audioRef.current, library, playlists,
+    queue, index, current, playing, loading, error, time, duration, buffered, settings, sleepAt, analyser, media: audioRef.current, videoDocked, library, playlists,
     playTracks, addToQueue, removeFromQueue, moveInQueue, insertInQueue, clearQueue, jumpTo, toggle, play, pause,
     next: () => next(false), previous, seek,
     setVolume: (volume: number) => updateSettings({ volume: Math.max(0, Math.min(1, volume)), muted: false }),
@@ -524,15 +549,26 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
     setEqEnabled: (eqEnabled: boolean) => { ensureGraph(); updateSettings({ eqEnabled }); },
     setPreamp: (preamp: number) => updateSettings({ preamp }),
     setSleep: (minutes: number | null) => setSleepAt(minutes ? Date.now() + minutes * 60_000 : null),
-    refreshLibrary, setPlaylists
-  }), [queue, index, current, playing, loading, error, time, duration, buffered, settings, sleepAt, analyser, library, playlists, playTracks, addToQueue, removeFromQueue, moveInQueue, insertInQueue, clearQueue, jumpTo, toggle, play, pause, next, previous, seek, updateSettings, toggleShuffle, ensureGraph, refreshLibrary]);
+    refreshLibrary, setPlaylists, dockVideo
+  }), [queue, index, current, playing, loading, error, time, duration, buffered, settings, sleepAt, analyser, videoDocked, dockVideo, library, playlists, playTracks, addToQueue, removeFromQueue, moveInQueue, insertInQueue, clearQueue, jumpTo, toggle, play, pause, next, previous, seek, updateSettings, toggleShuffle, ensureGraph, refreshLibrary]);
 
-  return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
+  const showMini = current?.kind === "video" && !videoDocked && !miniClosed;
+  return <PlayerContext.Provider value={value}>
+    {children}
+    <div className={`player-video-host${showMini ? " is-mini" : ""}`} aria-hidden={!showMini}>
+      <div ref={hostRef} className="player-video-frame" onClick={toggle} />
+      {showMini && <div className="mini-video-bar">
+        <span title={current?.title}>{current?.title}</span>
+        <Link href="/reproductor/" className="icon-button" aria-label="Abrir en el reproductor" title="Abrir en el reproductor">⤢</Link>
+        <button type="button" className="icon-button" onClick={() => setMiniClosed(true)} aria-label="Ocultar vídeo" title="Ocultar (sigue sonando)">×</button>
+      </div>}
+    </div>
+  </PlayerContext.Provider>;
 }
 
 /** Vista previa de un resultado de internet en el reproductor. */
-export async function previewTrack(url: string, fallback: { title: string; artist: string | null; cover: string | null; durationSeconds: number | null }): Promise<PlayerTrack> {
-  const data = await api<{ streamUrl: string; durationSeconds: number | null; title: string | null; thumbnailUrl: string | null }>("/api/preview", { body: { url, kind: "audio" } });
+export async function previewTrack(url: string, fallback: { title: string; artist: string | null; cover: string | null; durationSeconds: number | null }, kind: "audio" | "video" = "audio"): Promise<PlayerTrack> {
+  const data = await api<{ streamUrl: string; hasVideo: boolean; durationSeconds: number | null; title: string | null; thumbnailUrl: string | null }>("/api/preview", { body: { url, kind: kind === "video" ? "single" : "audio" } });
   return {
     id: `stream:${data.streamUrl}`,
     title: data.title ?? fallback.title,
@@ -541,7 +577,7 @@ export async function previewTrack(url: string, fallback: { title: string; artis
     durationSeconds: data.durationSeconds ?? fallback.durationSeconds,
     cover: fallback.cover ?? data.thumbnailUrl,
     src: data.streamUrl,
-    kind: "audio",
+    kind: kind === "video" && data.hasVideo ? "video" : "audio",
     format: "STREAM",
     lossless: false,
     needsTranscode: false,

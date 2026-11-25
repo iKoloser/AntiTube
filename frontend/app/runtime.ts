@@ -60,6 +60,11 @@ export async function setCloseToTray(enabled: boolean): Promise<void> {
   await tauriInternals()?.invoke("set_close_to_tray", { enabled }).catch(() => undefined);
 }
 
+/** Pone la ventana de la app a pantalla completa (solo escritorio; en la web no hace nada). */
+export async function setWindowFullscreen(enabled: boolean): Promise<void> {
+  await tauriInternals()?.invoke("plugin:window|set_fullscreen", { label: "main", value: enabled }).catch(() => undefined);
+}
+
 export async function quitApp(): Promise<void> {
   await tauriInternals()?.invoke("quit_app").catch(() => undefined);
 }
@@ -68,7 +73,7 @@ export async function quitApp(): Promise<void> {
 export async function pickMediaFiles(): Promise<string[] | undefined> {
   const internals = tauriInternals();
   if (!internals) return undefined;
-  const result = await internals.invoke("plugin:dialog|open", { options: { multiple: true, directory: false, title: "Añadir música a la biblioteca", filters: [{ name: "Audio y vídeo", extensions: ["mp3", "m4a", "m4b", "aac", "opus", "ogg", "oga", "flac", "wav", "weba", "aiff", "aif", "wma", "ape", "wv", "mka", "ac3", "dts", "mp2", "mpc", "tta", "caf", "dsf", "mp4", "m4v", "mkv", "webm", "mov"] }] } });
+  const result = await internals.invoke("plugin:dialog|open", { options: { multiple: true, directory: false, title: "Añadir música a la biblioteca", filters: [{ name: "Audio y vídeo", extensions: ["mp3", "m4a", "m4b", "aac", "opus", "ogg", "oga", "flac", "wav", "weba", "aiff", "aif", "wma", "ape", "wv", "mka", "ac3", "dts", "mp2", "mpc", "tta", "caf", "dsf", "mp4", "m4v", "mkv", "webm", "mov", "avi", "wmv", "flv", "ts"] }] } });
   if (Array.isArray(result)) return result.filter((item): item is string => typeof item === "string");
   return typeof result === "string" ? [result] : [];
 }

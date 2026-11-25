@@ -424,6 +424,9 @@ export async function downloadMedia(options: DownloadOptions): Promise<DownloadR
       throw new DownloadToolUnavailableError("yt-dlp no está instalado o no está disponible en PATH.");
     }
     const detail = error instanceof Error ? error.message.split(/\r?\n/).filter(Boolean).slice(-3).join(" | ") : "";
+    if (/DRM|encrypted|Go\+|preview.only|snipped/i.test(detail)) {
+      throw new DownloadFailedError("Este contenido está protegido con DRM (o solo hay un fragmento de prueba) y no se puede descargar. Prueba a buscarlo en YouTube Music, Bandcamp o Audius.");
+    }
     throw new DownloadFailedError(detail || "No se pudo completar la descarga. Comprueba la URL y los formatos disponibles.");
   }
 }

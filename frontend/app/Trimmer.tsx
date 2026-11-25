@@ -32,8 +32,9 @@ function TimeField({ label, value, onCommit }: Readonly<{ label: string; value: 
  */
 export default function Trimmer({ url, preferVideo, knownDuration, thumbnailUrl, value, onChange, onDuration }: Readonly<{ url: string; preferVideo: boolean; knownDuration: number | null; thumbnailUrl: string | null; value: Section | null; onChange: (section: Section | null) => void; onDuration?: (seconds: number) => void }>) {
   const mediaRef = useRef<HTMLVideoElement | null>(null);
+  const companionRef = useRef<HTMLAudioElement | null>(null);
   const trackRef = useRef<HTMLDivElement | null>(null);
-  const [preview, setPreview] = useState<{ src: string; hasVideo: boolean } | null>(null);
+  const [preview, setPreview] = useState<{ src: string; audioSrc: string | null; hasVideo: boolean } | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [message, setMessage] = useState<string | null>(null);
   const [duration, setDuration] = useState(knownDuration ?? 0);
@@ -48,10 +49,10 @@ export default function Trimmer({ url, preferVideo, knownDuration, thumbnailUrl,
     let cancelled = false;
     setStatus("loading");
     setPreview(null);
-    api<{ streamUrl: string; hasVideo: boolean; durationSeconds: number | null }>("/api/preview", { body: { url, kind: preferVideo ? "video" : "audio" } })
+    api<{ streamUrl: string; audioUrl?: string | null; hasVideo: boolean; durationSeconds: number | null }>("/api/preview", { body: { url, kind: preferVideo ? "video" : "audio" } })
       .then((data) => {
         if (cancelled) return;
-        setPreview({ src: `${apiUrl()}${data.streamUrl}`, hasVideo: data.hasVideo });
+        setPreview({ src: `${apiUrl()}${data.streamUrl}`, audioSrc: data.audioUrl ? `${apiUrl()}${data.audioUrl}` : null, hasVideo: data.hasVideo });
         if (data.durationSeconds) setDuration(data.durationSeconds);
         setStatus("ready");
       })
@@ -106,6 +107,35 @@ export default function Trimmer({ url, preferVideo, knownDuration, thumbnailUrl,
     };
   }, [preview, loopSelection]);
 
+  // Cuando la plataforma sirve imagen y sonido por separado (YouTube), el vídeo va
+  // sin sonido y un <audio> le sigue: play, pausa, saltos y pequeñas desviaciones.
+  useEffect(() => {
+    const video = mediaRef.current;
+    const audio = companionRef.current;
+    if (!video || !audio || !preview?.audioSrc) return;
+    const align = () => { if (Math.abs(audio.currentTime - video.currentTime) > 0.25) audio.currentTime = video.currentTime; };
+    const onPlay = () => { audio.currentTime = video.currentTime; void audio.play().catch(() => undefined); };
+    const onPause = () => audio.pause();
+    const onSeek = () => { audio.currentTime = video.currentTime; };
+    const onWaiting = () => audio.pause();
+    const onPlaying = () => { align(); if (audio.paused) void audio.play().catch(() => undefined); };
+    video.addEventListener("play", onPlay);
+    video.addEventListener("pause", onPause);
+    video.addEventListener("seeking", onSeek);
+    video.addEventListener("waiting", onWaiting);
+    video.addEventListener("playing", onPlaying);
+    video.addEventListener("timeupdate", align);
+    return () => {
+      audio.pause();
+      video.removeEventListener("play", onPlay);
+      video.removeEventListener("pause", onPause);
+      video.removeEventListener("seeking", onSeek);
+      video.removeEventListener("waiting", onWaiting);
+      video.removeEventListener("playing", onPlaying);
+      video.removeEventListener("timeupdate", align);
+    };
+  }, [preview]);
+
   function positionFromEvent(clientX: number): number {
     const rect = trackRef.current?.getBoundingClientRect();
     if (!rect || duration <= 0) return 0;
@@ -150,8 +180,9 @@ export default function Trimmer({ url, preferVideo, knownDuration, thumbnailUrl,
     <div className={`trim-stage${preview?.hasVideo ? " has-video" : ""}`} style={!preview?.hasVideo && thumbnailUrl ? { backgroundImage: `url("${thumbnailUrl}")` } : undefined}>
       {status === "loading" && <div className="trim-status"><span className="spinner" /> Preparando vista previa…</div>}
       {status === "unavailable" && <div className="trim-status">{message} Escribe los tiempos abajo.</div>}
-      {preview && <video ref={mediaRef} src={preview.src} preload="metadata" playsInline crossOrigin="use-credentials" className={preview.hasVideo ? "" : "is-audio"} onClick={() => { const element = mediaRef.current; if (!element) return; if (element.paused) void element.play(); else element.pause(); }} />}
-      {preview && !preview.hasVideo && <div className="trim-audio-badge">♫ Vista previa de audio</div>}
+      {preview?.audioSrc && <audio ref={companionRef} src={preview.audioSrc} preload="auto" crossOrigin="use-credentials" />}
+      {preview && <video ref={mediaRef} src={preview.src} preload="metadata" playsInline muted={Boolean(preview.audioSrc)} crossOrigin="use-credentials" className={preview.hasVideo ? "" : "is-audio"} onClick={() => { const element = mediaRef.current; if (!element) return; if (element.paused) void element.play(); else element.pause(); }} />}
+      {preview && !preview.hasVideo && <div className="trim-audio-badge">♫ {preferVideo ? "Esta plataforma solo ofrece el audio para previsualizar" : "Vista previa de audio"}</div>}
     </div>
     <div className="trim-timeline" ref={trackRef} onPointerDown={(event) => { if (mediaRef.current) mediaRef.current.currentTime = positionFromEvent(event.clientX); }}>
       <div className="trim-ticks">{Array.from({ length: 11 }, (_, index) => <span key={index} style={{ left: `${index * 10}%` }}><em>{duration ? formatTime((duration * index) / 10) : ""}</em></span>)}</div>
@@ -167,7 +198,7 @@ export default function Trimmer({ url, preferVideo, knownDuration, thumbnailUrl,
       <span className="trim-clock">{preciseTime(time)} / {formatTime(duration)}</span>
       <button type="button" className="chip-button" disabled={!preview} onClick={() => update({ start: time })}>[ Inicio aquí</button>
       <button type="button" className="chip-button" disabled={!preview} onClick={() => update({ end: time })}>Fin aquí ]</button>
-      <button type="button" className="chip-button is-accent" disabled={!preview} onClick={playSelection}>▶ Escuchar selección</button>
+      <button type="button" className="chip-button is-accent" disabled={!preview} onClick={playSelection}>▶ {preview?.hasVideo ? "Ver selección" : "Escuchar selección"}</button>
       <TimeField label="Inicio" value={section.start} onCommit={(seconds) => update({ start: seconds })} />
       <TimeField label="Fin" value={section.end} onCommit={(seconds) => update({ end: seconds })} />
       {!isFull && <button type="button" className="chip-button" onClick={() => onChange({ start: 0, end: duration })}>Restablecer</button>}

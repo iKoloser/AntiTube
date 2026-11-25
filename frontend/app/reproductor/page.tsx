@@ -7,12 +7,12 @@ import { Cover } from "../player/PlayerDock";
 import { addToPlaylist, createPlaylist, deletePlaylist, updatePlaylist } from "../player/playlists";
 import { formatLabel, formatTime, playableFormats, toPlayerTrack, type LibraryTrack } from "../player/types";
 import { api, isDesktop, pickMediaFiles, pickMusicFolder } from "../runtime";
-import { IconClose, IconDisc, IconFile, IconFolder, IconHeadphones, IconList, IconPlay, IconPlus, IconQueue, IconRefresh, IconSearch, IconShuffle, IconTrash, IconUser } from "../shell/icons";
+import { IconClose, IconDisc, IconFile, IconFolder, IconHeadphones, IconList, IconPlay, IconPlus, IconQueue, IconRefresh, IconSearch, IconShuffle, IconTrash, IconUser, IconVideo } from "../shell/icons";
 import { useToast } from "../shell/Toasts";
 import NowPlaying from "./NowPlaying";
 import TrackTable, { type SortKey, type TrackMenuRequest } from "./TrackTable";
 
-type View = { type: "songs" } | { type: "albums"; album?: string } | { type: "artists"; artist?: string } | { type: "queue" } | { type: "playlist"; id: string };
+type View = { type: "songs" } | { type: "videos" } | { type: "albums"; album?: string } | { type: "artists"; artist?: string } | { type: "queue" } | { type: "playlist"; id: string };
 
 const collator = new Intl.Collator("es", { sensitivity: "base", numeric: true });
 
@@ -128,6 +128,7 @@ export default function PlayerPage() {
   const [menu, setMenu] = useState<TrackMenuRequest | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const tracks = player.library.tracks;
+  const [cinema, setCinema] = useState(false);
   const byId = useMemo(() => new Map(tracks.map((track) => [track.id, track])), [tracks]);
 
   useEffect(() => {
@@ -185,12 +186,14 @@ export default function PlayerPage() {
     }).sort((a, b) => collator.compare(a.title, b.title));
   }, [filtered]);
 
+  const videoCount = useMemo(() => tracks.filter((track) => track.kind === "video").length, [tracks]);
   const playlist = view.type === "playlist" ? player.playlists.find((item) => item.id === view.id) ?? null : null;
 
   const listed = useMemo(() => {
     if (view.type === "playlist") return (playlist?.trackIds ?? []).map((id) => byId.get(id)).filter((track): track is LibraryTrack => Boolean(track)).filter((track) => matches(track, query));
     if (view.type === "albums" && view.album) return albums.find((album) => album.key === view.album)?.tracks ?? [];
     if (view.type === "artists" && view.artist) return sortTracks(artists.find((artist) => artist.key === view.artist)?.tracks ?? [], "album", false);
+    if (view.type === "videos") return sortTracks(filtered.filter((track) => track.kind === "video"), sort.key, sort.descending);
     return sortTracks(filtered, sort.key, sort.descending);
   }, [view, playlist, byId, query, albums, artists, filtered, sort]);
 
@@ -221,16 +224,18 @@ export default function PlayerPage() {
 
   const totalDuration = listed.reduce((total, track) => total + (track.durationSeconds ?? 0), 0);
   const heading = view.type === "songs" ? "Canciones"
+    : view.type === "videos" ? "Vídeos"
     : view.type === "albums" ? (view.album ? albums.find((album) => album.key === view.album)?.title ?? "Álbum" : "Álbumes")
     : view.type === "artists" ? (view.artist ?? "Artistas")
     : view.type === "queue" ? "Cola"
     : playlist?.name ?? "Lista";
   const showGrid = (view.type === "albums" && !view.album) || (view.type === "artists" && !view.artist);
 
-  return <main className="page page-player">
+  return <main className={`page page-player${cinema && player.current?.kind === "video" ? " is-cinema" : ""}`}>
     <aside className="library-nav">
       <p className="kicker">// biblioteca</p>
       <button type="button" className={`library-link${view.type === "songs" ? " active" : ""}`} onClick={() => setView({ type: "songs" })}><IconHeadphones size={17} /> Canciones <small>{tracks.length}</small></button>
+      <button type="button" className={`library-link${view.type === "videos" ? " active" : ""}`} onClick={() => setView({ type: "videos" })}><IconVideo size={17} /> Vídeos <small>{videoCount}</small></button>
       <button type="button" className={`library-link${view.type === "albums" ? " active" : ""}`} onClick={() => setView({ type: "albums" })}><IconDisc size={17} /> Álbumes</button>
       <button type="button" className={`library-link${view.type === "artists" ? " active" : ""}`} onClick={() => setView({ type: "artists" })}><IconUser size={17} /> Artistas</button>
       <button type="button" className={`library-link${view.type === "queue" ? " active" : ""}`} onClick={() => setView({ type: "queue" })} data-drop="queue"><IconQueue size={17} /> Cola <small>{player.queue.length}</small></button>
@@ -257,7 +262,7 @@ export default function PlayerPage() {
         <div className="view-head">
           <div>
             <p className="kicker">{view.type === "playlist" ? "// lista" : view.type === "albums" && view.album ? "// álbum" : view.type === "artists" && view.artist ? "// artista" : "// biblioteca"}</p>
-            <h2>{heading} {!showGrid && <small>{listed.length} canciones · {formatTime(totalDuration)}</small>}</h2>
+            <h2>{heading} {!showGrid && <small>{listed.length} {view.type === "videos" ? "vídeos" : "canciones"} · {formatTime(totalDuration)}</small>}</h2>
           </div>
           <div className="view-actions">
             {((view.type === "albums" && view.album) || (view.type === "artists" && view.artist)) && <button type="button" className="chip-button" onClick={() => setView({ type: view.type } as View)}>← Volver</button>}
@@ -278,17 +283,17 @@ export default function PlayerPage() {
           : <TrackTable
               tracks={listed}
               playlistId={view.type === "playlist" ? view.id : undefined}
-              sort={view.type === "songs" ? sort : undefined}
-              onSort={view.type === "songs" ? (key) => setSort((current) => ({ key, descending: current.key === key ? !current.descending : key === "added" })) : undefined}
+              sort={view.type === "songs" || view.type === "videos" ? sort : undefined}
+              onSort={view.type === "songs" || view.type === "videos" ? (key) => setSort((current) => ({ key, descending: current.key === key ? !current.descending : key === "added" })) : undefined}
               onPlay={(index) => playFrom(listed, index)}
               onMenu={setMenu}
-              emptyText={!player.library.loaded ? "Cargando biblioteca…" : view.type === "playlist" ? "Lista vacía. Arrastra canciones aquí o usa «Añadir a una lista»." : query ? "Nada coincide con el filtro." : "Aún no hay música. Descarga algo en MP3, M4A, Opus o FLAC, o arrastra tus archivos a la ventana."}
+              emptyText={!player.library.loaded ? "Cargando biblioteca…" : view.type === "videos" && !query ? "Aún no hay vídeos. Descarga algo en MP4 o arrastra tus vídeos (MP4, MKV, WEBM, MOV, AVI…) a la ventana." : view.type === "playlist" ? "Lista vacía. Arrastra canciones aquí o usa «Añadir a una lista»." : query ? "Nada coincide con el filtro." : "Aún no hay música. Descarga algo en MP3, M4A, Opus o FLAC, o arrastra tus archivos a la ventana."}
             />}
         <p className="library-formats">Reproduce {playableFormats.join(" · ")}</p>
       </>}
     </section>
 
-    <NowPlaying />
+    <NowPlaying cinema={cinema} onCinema={() => setCinema((value) => !value)} />
     {menu && <TrackMenu request={menu} playlistId={view.type === "playlist" ? view.id : undefined} onClose={() => setMenu(null)} />}
   </main>;
 }

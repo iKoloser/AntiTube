@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "La interfaz habla con el backend local por HTTP; usa IPC para el selector de carpetas, los archivos arrastrados a la ventana y la bandeja.",
   "windows": ["main"],
-  "permissions": ["core:default", "dialog:allow-open", "notification:default"]
+  "permissions": ["core:default", "core:window:allow-set-fullscreen", "dialog:allow-open", "notification:default"]
 }
