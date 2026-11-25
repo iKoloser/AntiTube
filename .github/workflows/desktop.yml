@@ -4,6 +4,8 @@ on:
   push:
     branches: [desktop]
     tags: ["desktop-v*"]
+    # Cambiar solo documentación no publica una versión nueva.
+    paths-ignore: ["**.md", "docs/**"]
   pull_request:
     paths: ["desktop/**", "frontend/**", "backend/**", ".github/workflows/desktop.yml"]
   workflow_dispatch:

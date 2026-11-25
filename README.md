@@ -5,217 +5,176 @@
 </p>
 
 <p align="center">
-  Aplicación multimedia local, privada y educativa para analizar, reconocer y descargar contenido autorizado.
+  <strong>Busca, descarga, recorta y reproduce música y vídeo desde una sola app para Windows.</strong><br />
+  Local, privada y con estética de terminal.
 </p>
 
 <p align="center">
-  <a href="#inicio-rápido">Inicio rápido</a> ·
+  <a href="https://github.com/iKoloser/AntiTube/releases">Descargar</a> ·
   <a href="#funcionalidades">Funcionalidades</a> ·
+  <a href="#instalación">Instalación</a> ·
   <a href="#arquitectura">Arquitectura</a> ·
+  <a href="#desarrollo">Desarrollo</a> ·
   <a href="#solución-de-problemas">Solución de problemas</a>
 </p>
 
-> AntiTube está pensado para ejecutarse en tu propio ordenador. Úsalo únicamente con contenido que tengas derecho a descargar o transformar.
+> AntiTube se ejecuta en tu propio ordenador. Úsalo únicamente con contenido que tengas derecho a descargar o transformar, y respeta las condiciones de cada plataforma.
 
-AntiTube es una aplicación web privada y local para trabajar con contenido multimedia con fines educativos. Recibe una URL, identifica su plataforma, consulta metadatos y permite preparar salidas MP4 o MP3 mediante `yt-dlp` y FFmpeg. También incorpora una pestaña SHAZAM para capturar hasta 12 segundos del audio de una pestaña del navegador y reconocer la canción con ShazamIO.
+AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https://tauri.app/). Busca y descarga contenido de YouTube, YouTube Music, Bandcamp, Audius, SoundCloud y cualquier sitio compatible con [yt-dlp](https://github.com/yt-dlp/yt-dlp). Recorta el fragmento exacto que quieres viéndolo antes y lo guarda en el formato real que emite la plataforma. Incluye un reproductor de música y vídeo con biblioteca, listas, ecualizador y visualizador.
+
+> **Estado:** versión **1.0 BETA**. Sale de beta cuando se confirme que todo funciona bien en uso real.
 
 ## Funcionalidades
 
-- Análisis local de URLs y detección de plataforma.
-- Preview de título, canal, duración, miniatura y dominio antes de descargar.
-- Descarga de vídeo MP4 con calidades seleccionables.
-- Extracción de audio MP3 con calidades de 128 a 320 kbps.
-- Playlists con lista previa, progreso por elemento y un único ZIP final.
-- Descargas de YouTube, SoundCloud, TikTok, Twitch Clips, Twitter/X y otros sitios compatibles con `yt-dlp`.
-- Pestaña **SHAZAM** con captura de audio del navegador, reconocimiento y enlaces a YouTube, SoundCloud, Spotify y Shazam.
-- Descargas MP3 desde YouTube/SoundCloud en los resultados de SHAZAM; Spotify se muestra como enlace oficial.
-- Actividad del backend y progreso visible durante las tareas largas.
-- Acceso privado de una sola clave, sin registro ni usuarios.
+### Buscar y descargar
 
-## Vista del proyecto
+- **Buscador integrado** en YouTube, YouTube Music, Bandcamp, Audius y SoundCloud. Se buscan varias plataformas a la vez y cada resultado se puede escuchar, ver, abrir con todas las opciones o mandar directo a la cola.
+- **Pega cualquier enlace** de los más de 1.000 sitios que soporta yt-dlp: YouTube, TikTok, Twitch, Twitter/X, Vimeo, Instagram, Reddit, Bilibili y más.
+- **Formatos de audio reales**, sin conversiones que empeoren el sonido:
+  - **M4A (AAC)** y **OPUS** se guardan tal cual los emite la plataforma.
+  - **FLAC** solo se ofrece cuando la fuente es de verdad sin pérdida.
+  - **MP3** de 128 a 320 kbps cuando lo que necesitas es compatibilidad.
+- **Vídeo MP4** con la calidad que elijas, incluidos 4K y 8K. No hay límite de tamaño por archivo.
+- **Recorte con vista previa:** ves o escuchas el contenido dentro de la app y marcas inicio y fin arrastrando, con botones o escribiendo los tiempos. Los cortes de vídeo son exactos al fotograma.
+- **Descargas en paralelo:** eliges cuántas a la vez, de 1 a 5, con progreso, velocidad y tiempo restante de cada una.
+- **Playlists** con la lista previa, para elegir qué elementos bajar. Una canción que falle no detiene las demás.
+- **Lote de enlaces:** pega muchas URLs de golpe.
+- **Descarga rápida:** un botón en cada resultado de búsqueda con tus ajustes favoritos.
+- **Etiquetas y portada** incrustadas en los archivos de audio.
 
-El logo utilizado por la interfaz se incluye en el repositorio para que GitHub pueda mostrarlo sin depender de servicios externos:
+### Reproductor de música y vídeo
 
-![Logo de AntiTube](frontend/public/antitube-logo.png)
+- **Biblioteca** que lee tu carpeta de descargas y las carpetas que añadas, o los archivos que arrastres desde el Explorador. Tiene vistas de canciones, vídeos, álbumes y artistas, y un filtro instantáneo.
+- **Abre casi cualquier formato:** MP3, M4A/AAC, ALAC, FLAC, OPUS, OGG, WAV, AIFF, WMA, APE, WavPack, DSF y más. En vídeo, MP4, WEBM, MKV, MOV, AVI, WMV, FLV y TS. Lo que el reproductor no abre de forma directa se prepara al vuelo, sin pérdida siempre que es posible.
+- **Listas de reproducción y cola:** arrastra canciones a una lista, a la cola o a una posición concreta, o selecciona varias a la vez.
+- **Controles completos:** aleatorio, repetir una o todas, velocidad de 0,5× a 2×, temporizador para dormir con bajada suave de volumen y teclas multimedia de Windows.
+- **Ecualizador de 10 bandas** con preamplificador y preajustes (Graves +, Voces, Rock, Electrónica…).
+- **Visualizador** en tres estilos: radial, barras y onda.
+- **Vídeo:** modo cine, pantalla completa (doble clic o tecla F), imagen en imagen, ajustar o rellenar, y una ventanita flotante que sigue reproduciendo si cambias de página.
+- **Vista previa en streaming:** escucha o ve un resultado de búsqueda sin descargarlo.
 
-El flujo principal de la aplicación es:
+### Integración con Windows
 
-```mermaid
-flowchart LR
-    A[Frontend Next.js] -->|HTTP local| B[API Express]
-    B --> C[yt-dlp]
-    B --> D[FFmpeg]
-    B --> E[ShazamIO]
-    C --> F[downloads/]
-    D --> F
-```
+- **Icono en la bandeja del sistema** con controles del reproductor (reproducir/pausar, anterior, siguiente) y acceso a las descargas.
+- **Avisos de Windows** cuando termina o falla una descarga y la ventana no está a la vista.
+- **Cerrar a la bandeja:** al cerrar la ventana, las descargas siguen. Se puede desactivar en Ajustes.
+- **Instancia única:** si abres AntiTube otra vez, se muestra la ventana que ya estaba abierta.
+- **Actualizaciones de la app** desde la propia app: avisa de cada versión nueva, enseña sus novedades y se instala con un clic.
+- **Herramientas siempre al día:** yt-dlp, FFmpeg y ShazamIO se instalan solos en el primer arranque y se actualizan al abrir la app. No hace falta tocar nada fuera de AntiTube.
+
+### SHAZAM
+
+- **Reconocimiento de canciones** con [ShazamIO](https://github.com/shazamio/ShazamIO) a partir de unos segundos de audio.
+- Enlaces al resultado en YouTube, SoundCloud y Spotify, y descarga directa en MP3.
+
+### Interfaz
+
+- Diseño oscuro con aire **hacker / terminal**: tipografía monoespaciada, brillos neón, rejilla de fondo y animaciones suaves.
+- **Adaptable:** funciona desde ventanas grandes hasta muy estrechas, con navegación lateral plegable.
+- Navegación instantánea entre secciones sin cortar la música.
+
+## Instalación
+
+1. Ve a [Releases](https://github.com/iKoloser/AntiTube/releases) y descarga el último `AntiTube_<versión>_x64-setup.exe`.
+2. Ejecútalo. No necesita permisos de administrador.
+3. Al abrir la app por primera vez, el asistente descarga yt-dlp y FFmpeg (y SHAZAM si quieres) con barra de progreso.
+
+Windows puede avisar con SmartScreen porque el instalador no está firmado: pulsa **Más información › Ejecutar de todas formas**.
+
+Las descargas se guardan en **Descargas › AntiTube**. La carpeta se puede cambiar en Ajustes.
 
 ## Arquitectura
 
-| Parte | Tecnología | Puerto |
-| --- | --- | ---: |
-| Interfaz | Next.js, React, TypeScript, Tailwind/PostCSS | `3000` |
-| API | Express, TypeScript | `4000` |
-| Descargas | yt-dlp | proceso local |
-| Conversión | FFmpeg | proceso local |
-| Reconocimiento | Python + ShazamIO | proceso local |
+```mermaid
+flowchart LR
+    A[Ventana Tauri 2<br/>Rust: bandeja, avisos,<br/>instancia única] -->|carga| B[Interfaz Next.js<br/>exportada en estático]
+    A -->|arranca y vigila| C[Motor local<br/>Node + Express]
+    B -->|HTTP 127.0.0.1:puerto libre| C
+    C --> D[yt-dlp]
+    C --> E[FFmpeg]
+    C --> F[Python + ShazamIO<br/>opcional]
+    C -->|eventos| A
+```
+
+| Parte | Tecnología |
+| --- | --- |
+| Ventana, bandeja, avisos, instalador | Rust, Tauri 2, NSIS |
+| Interfaz | Next.js 16, React 19, TypeScript, CSS propio |
+| Reproductor | Web Audio (ecualizador, visualizador), Media Session |
+| Motor local | Node 22, Express 5, TypeScript, empaquetado con esbuild |
+| Descargas y búsqueda | yt-dlp, APIs públicas de Bandcamp y Audius |
+| Conversión y vídeo | FFmpeg |
+| Metadatos de la biblioteca | music-metadata |
+| Reconocimiento | Python + ShazamIO |
+
+- El motor solo escucha en `127.0.0.1`, en un puerto libre que se elige al arrancar. En escritorio no hay clave de acceso.
+- Cada descarga trabaja en su propia carpeta temporal y solo pasa a la carpeta final cuando está completa.
+- El motor avisa a la ventana de Rust (descarga terminada, cola) para que esta muestre los avisos de Windows y actualice la bandeja.
 
 ## Estructura
 
 ```text
 AntiTube/
-├── frontend/              # Next.js, React, TypeScript y Tailwind CSS
-├── backend/               # API Express y TypeScript
-├── docker-compose.yml     # Empaquetado Docker futuro
-├── package.json           # Scripts comunes del monorepo
-├── pnpm-workspace.yaml    # Declaración de los paquetes del monorepo
-├── .env.example           # Variables de entorno de ejemplo
-└── README.md
+├── desktop/               # App de escritorio Tauri 2 (Rust) y script de empaquetado
+│   └── src-tauri/         # Ventana, bandeja, avisos, imágenes del instalador
+├── frontend/              # Interfaz Next.js
+│   └── app/
+│       ├── player/        # Reproductor global, ecualizador, visualizador, arrastrar y soltar
+│       ├── reproductor/   # Biblioteca, listas y pantalla «Ahora suena»
+│       ├── shell/         # Marco de la app, iconos y avisos
+│       └── ...            # Descargar, Descargas, SHAZAM, Ajustes
+├── backend/               # Motor local Express
+│   └── src/
+│       ├── downloader.ts  # yt-dlp: formatos reales, recortes, playlists
+│       ├── jobs.ts        # Cola de descargas en paralelo
+│       ├── media.ts       # Búsqueda y vista previa en streaming
+│       ├── library.ts     # Biblioteca, listas, conversión para reproducir
+│       ├── setup.ts       # Instalación y actualización de herramientas
+│       └── appUpdate.ts   # Actualizaciones de la app
+└── .github/workflows/desktop.yml  # Compila y publica el instalador
 ```
 
-## Requisitos
+## Desarrollo
 
-Instala [Node.js](https://nodejs.org/) (se recomienda una versión LTS actual) y activa pnpm mediante Corepack:
+Necesitas [Node.js 22](https://nodejs.org/), pnpm (`corepack enable`), yt-dlp y FFmpeg.
 
 ```bash
-corepack enable
-corepack prepare pnpm@10.15.1 --activate
-```
-
-Comprueba la instalación:
-
-```bash
-node --version
-pnpm --version
-```
-
-Para esta fase no necesitas Docker. Instala también `yt-dlp` y FFmpeg:
-
-```powershell
-winget install --id yt-dlp.yt-dlp --exact
-```
-
-Ese paquete instala `yt-dlp`, FFmpeg y sus dependencias. AntiTube activa Node.js como runtime JavaScript de yt-dlp para evitar avisos de extracción de YouTube. Cierra y vuelve a abrir PowerShell después de instalarlo para actualizar `PATH`.
-
-Para activar la pestaña **SHAZAM**, instala Python y la dependencia oficial de ShazamIO:
-
-```powershell
-python -m pip install -r backend/requirements.txt
-```
-
-ShazamIO reconoce un fragmento de audio desde un archivo o bytes y devuelve los datos de la canción. [Documentación de ShazamIO](https://github.com/shazamio/ShazamIO).
-
-## Inicio rápido
-
-Desde la raíz del proyecto, crea tu archivo de variables y descarga las dependencias:
-
-```bash
-copy .env.example .env
 pnpm install
+pnpm dev          # interfaz en http://localhost:3000 y motor en http://localhost:4000
+pnpm typecheck
 ```
 
-En PowerShell, `copy` también funciona como alias de `Copy-Item`. El archivo `.env` define el puerto de Express, el origen permitido por CORS y la URL pública del backend.
-
-### Acceso privado
-
-AntiTube está preparado para alojarse online con un único usuario. Define `ANTITUBE_ACCESS_KEY` en `.env` con una clave larga y aleatoria. La clave se valida en el backend y la sesión se mantiene mediante una cookie `HttpOnly`; nunca se expone como variable pública del frontend ni debe subirse a GitHub. El acceso incluye límite de intentos configurable y un botón **Salir** en la interfaz.
-
-En producción, sirve frontend y backend mediante HTTPS para que la cookie tenga protección `Secure` y para que la captura de audio de SHAZAM funcione correctamente.
-
-Comprueba las herramientas multimedia:
+Para la app de escritorio necesitas además [Rust](https://rustup.rs/) y, en Windows, las [Build Tools de Visual Studio](https://tauri.app/start/prerequisites/#windows):
 
 ```powershell
-pnpm tools:check
+pnpm desktop:dev     # app de escritorio con recarga en caliente
+pnpm desktop:build   # instalador en desktop\src-tauri\target\release\bundle\nsis\
 ```
 
-## Arrancar el proyecto
+### Publicar una versión
 
-Para desarrollo local:
+1. Sube la versión en `desktop/src-tauri/tauri.conf.json`, `desktop/package.json` y `desktop/src-tauri/Cargo.toml`.
+2. Haz push a la rama `desktop`. GitHub Actions compila el instalador en Windows y publica la release `desktop-v<versión>`.
+3. El mensaje del último commit aparece como «Novedades» en la release y en el aviso de actualización de la app.
 
-```bash
-pnpm dev
-```
+### Versión web (opcional)
 
-Se abrirán dos servidores:
-
-- Frontend: http://localhost:3000
-- Backend: http://localhost:4000
-
-Para compilarlos antes de arrancar en modo producción:
-
-```bash
-pnpm typecheck
-pnpm build
-pnpm start
-```
-
-## Docker más adelante
-
-Docker se conserva como una forma futura de empaquetar AntiTube. Cuando terminemos el desarrollo local, con Docker Desktop en ejecución se podrá usar:
-
-```bash
-docker compose up --build
-```
-
-Docker compila ambos paquetes y publica los mismos puertos locales: `3000` para el frontend y `4000` para el backend. Para detenerlos, usa `Ctrl+C`.
-
-## Comprobar la conexión frontend-backend
-
-Primero prueba la salud de la API:
-
-```bash
-curl http://localhost:4000/api/health
-```
-
-Debe responder con `{"status":"ok","service":"antitube-backend"}`. Después abre http://localhost:3000, escribe una URL completa —por ejemplo `https://www.youtube.com/watch?v=ejemplo`— y pulsa **Analizar**. La página mostrará la plataforma, el dominio y la URL normalizada devueltos por Express.
-
-También puedes probar la API directamente:
-
-```bash
-curl -X POST http://localhost:4000/api/analyze -H "Content-Type: application/json" -d "{\"url\":\"https://vimeo.com/123\"}"
-```
-
-## Endpoints
-
-- `GET /api/health`: confirma que Express está disponible.
-- `POST /api/analyze`: recibe `{ "url": "https://..." }`; valida HTTP/HTTPS y devuelve dominio y plataforma detectada. Una URL inválida devuelve HTTP 400 y un mensaje explicativo.
-- `POST /api/metadata`: consulta metadatos mediante `yt-dlp` con `--skip-download`. Requiere que `yt-dlp` esté instalado localmente; no escribe ni descarga archivos multimedia. Puedes enviar `playlist: true` para obtener el título, el número y la lista de elementos de una playlist (hasta `MAX_PLAYLIST_ITEMS`).
-- `POST /api/download`: recibe `{ "url": "https://...", "format": "mp4" | "mp3", "quality": "720", "playlist": false, "playlistTotal": 12 }` e inicia una tarea asíncrona. `playlistTotal` permite mostrar desde el primer momento el total de elementos. TikTok y Twitch Clips solo admiten `mp4`. Devuelve un `jobId` para consultar el progreso.
-- `GET /api/download/:jobId`: devuelve el estado (`queued`, `downloading`, `completed` o `failed`), porcentaje, velocidad, ETA, últimas líneas de actividad del backend y, al terminar, el enlace de descarga. Para una playlist genera un único ZIP con el nombre de la playlist y canciones con el título del vídeo; para una descarga individual devuelve un archivo con su título. Para MP4 se admiten `best`, `360`, `480`, `720` y `1080`; para MP3, `128`, `192`, `256` y `320` kbps. Con `playlist: true` descarga hasta `MAX_PLAYLIST_ITEMS` elementos (50 por defecto), con un límite de 500 MB por archivo y una tarea simultánea.
-- `GET /api/downloads/:filename`: sirve un archivo generado por una descarga válida.
-- `POST /api/shazam/recognize`: recibe un fragmento de audio en base64, lo reconoce con ShazamIO y devuelve título, artista, portada y enlaces para YouTube, SoundCloud y Spotify. Desde la interfaz, YouTube y SoundCloud permiten buscar y preparar una descarga MP3; Spotify se mantiene como enlace oficial.
-- `POST /api/auth/login`, `GET /api/auth/session` y `POST /api/auth/logout`: gestionan el acceso de clave única. El resto de endpoints requiere una sesión válida.
-
-La interfaz muestra automáticamente título, miniatura, plataforma y enlace al contenido original. También incluye un índice visible de plataformas: YouTube, TikTok, Twitch Clips, Twitter/X, Vimeo, Instagram, Facebook, Reddit, SoundCloud, Bandcamp, Dailymotion, Bilibili, Rumble, Kick, VK y Streamable, además de otros sitios compatibles con `yt-dlp`. La pestaña **SHAZAM** permite compartir una pestaña con audio, grabar hasta 12 segundos y consultar la canción reconocida en YouTube, SoundCloud y Spotify. Si la URL parece una playlist, la detecta automáticamente, muestra sus canciones numeradas antes de descargar, marca visualmente las ya procesadas y ofrece un único botón para descargar toda la playlist. En ese caso la preview usa un placeholder de playlist y el resumen indica un ZIP, no un MP3. Twitter/X, TikTok y Twitch Clips se analizan y descargan mediante `yt-dlp`, con MP4 obligatorio para TikTok y Twitch Clips.
-
-## Pendiente
-
-Las descargas requieren que tengas autorización para usar el contenido y respeten las condiciones de la plataforma. Docker sigue pendiente como empaquetado final; el desarrollo actual funciona directamente con Node.js, `yt-dlp` y FFmpeg.
+El mismo código funciona como web privada con un único usuario: define `ANTITUBE_ACCESS_KEY` en `.env` (copia `.env.example`). La clave se valida en el motor y la sesión usa una cookie `HttpOnly`. Sírvela por HTTPS. En modo web se mantiene un límite de 500 MB por archivo (`MAX_DOWNLOAD_BYTES`).
 
 ## Solución de problemas
 
-### `yt-dlp no está instalado o no está disponible en PATH`
+### Avisos de «n challenge» o faltan formatos de YouTube
 
-Comprueba la herramienta y reinicia PowerShell para actualizar el `PATH`:
+YouTube cambia a menudo y solo la última versión de yt-dlp sabe seguirle el ritmo. AntiTube lo actualiza solo al abrirse. También puedes hacerlo en **Ajustes › Herramientas › Actualizar**.
 
-```powershell
-yt-dlp --version
-ffmpeg -version
-```
+### «Este contenido está protegido con DRM»
 
-También puedes iniciar el proyecto con `iniciar-antitube.bat`, que localiza `pnpm`, `yt-dlp` y Python antes de arrancar los servidores.
+Algunos temas de SoundCloud (Go+) y de otras plataformas están cifrados y no se pueden descargar. Prueba a buscarlos en YouTube Music, Bandcamp o Audius.
 
-### SHAZAM no recibe audio
+### Un archivo no se reproduce
 
-Usa Chrome o Edge, reproduce la música en otra pestaña. Activa **Compartir audio** en el diálogo del navegador. El audio se procesa localmente mediante el backend y el archivo temporal se elimina después del reconocimiento.
+Los formatos que el reproductor no abre de forma directa se preparan con FFmpeg la primera vez. Si falla, comprueba en **Ajustes › Herramientas** que FFmpeg está instalado.
 
-### El backend no encuentra ShazamIO
+### SHAZAM no está disponible
 
-Instala la dependencia con el mismo Python configurado en `.env`:
-
-```powershell
-python -m pip install -r backend\requirements.txt
-```
-
-Si tienes varias instalaciones de Python, configura `PYTHON_BIN` con la ruta completa del ejecutable.
-
+Instálalo desde **Ajustes › Herramientas**. Si no hay Python en el equipo, AntiTube descarga uno privado (unos 30 MB) que no toca el sistema.
