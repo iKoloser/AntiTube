@@ -187,7 +187,7 @@ export async function searchMedia(provider: SearchProvider, query: string, limit
 }
 
 /** `fallback`: URL original para reintentar por tubería (yt-dlp + FFmpeg) si la directa falla. */
-type PreviewSource = { url: string; headers: Record<string, string>; expires: number; fallback?: string };
+type PreviewSource = { url: string; headers: Record<string, string>; expires: number; fallback?: string; hls?: { duration: number | null } };
 const previews = new Map<string, PreviewSource>();
 
 function prunePreviews(): void {
@@ -243,6 +243,11 @@ async function resolvePreview(url: string, kind: PreviewKind, timeoutMs: number,
     return { ...common, source: { url: video.url, headers: headersOf(video) }, audio: { url: audio.url, headers: headersOf(audio) }, hasVideo: true };
   }
   const chosen = requested[0] ?? info;
+  // Audio que solo se emite troceado en HLS (SoundCloud, sobre todo): FFmpeg lo
+  // junta al vuelo y lo entrega como MP3, y se puede saltar a cualquier punto.
+  if (kind === "audio" && !usable(chosen) && chosen.url && chosen.protocol?.startsWith("m3u8")) {
+    return { ...common, source: { url: chosen.url, headers: headersOf(chosen), hls: { duration: common.duration } }, audio: null, hasVideo: false };
+  }
   if (!usable(chosen)) return null;
   return { ...common, source: { url: chosen.url, headers: headersOf(chosen) }, audio: null, hasVideo: kind !== "audio" && hasVideoTrack(chosen) };
 }
@@ -304,6 +309,56 @@ async function listenToken(url: string, timeoutMs: number): Promise<string> {
   })().finally(() => listenPending.delete(url));
   listenPending.set(url, job);
   return job;
+}
+
+// MP3 a 192 kbps constantes: 24.000 bytes por segundo. Así cada byte que pide el
+// reproductor corresponde a un instante y se puede saltar dentro de un HLS.
+const hlsBytesPerSecond = 24_000;
+
+function streamHls(source: PreviewSource, request: Request, response: Response): void {
+  const duration = source.hls?.duration ?? null;
+  const total = duration ? Math.ceil(duration * hlsBytesPerSecond) : null;
+  const asked = /^bytes=(\d+)-(\d*)$/.exec(String(request.headers.range ?? ""));
+  const from = asked && total ? Math.min(Number(asked[1]), total - 1) : 0;
+  const until = total ? Math.min(asked?.[2] ? Number(asked[2]) : total - 1, total - 1) : null;
+  const headers = Object.entries(source.headers).map(([name, value]) => `${name}: ${value}\r\n`).join("");
+  const ffmpeg = spawn(process.env.FFMPEG_BIN ?? "ffmpeg", [
+    "-nostdin", "-hide_banner", "-loglevel", "error",
+    ...(from > 0 ? ["-ss", (from / hlsBytesPerSecond).toFixed(2)] : []),
+    ...(headers ? ["-headers", headers] : []),
+    "-i", source.url, "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "-write_xing", "0", "-f", "mp3", "pipe:1"
+  ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  let errors = "";
+  ffmpeg.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-1000); });
+  request.on("close", () => ffmpeg.kill());
+  ffmpeg.on("error", () => { if (!response.headersSent) response.status(503).json({ error: "FFmpeg no disponible", message: "Hace falta FFmpeg para escuchar este contenido." }); });
+  response.setHeader("Content-Type", "audio/mpeg");
+  response.setHeader("Cache-Control", "no-store");
+  if (total !== null && until !== null) {
+    response.setHeader("Accept-Ranges", "bytes");
+    response.setHeader("Content-Length", String(until - from + 1));
+    if (asked) {
+      response.status(206);
+      response.setHeader("Content-Range", `bytes ${from}-${until}/${total}`);
+    }
+  }
+  let sent = 0;
+  const limit = until !== null ? until - from + 1 : Number.MAX_SAFE_INTEGER;
+  ffmpeg.stdout.on("data", (chunk: Buffer) => {
+    if (sent >= limit) return;
+    const piece = chunk.length > limit - sent ? chunk.subarray(0, limit - sent) : chunk;
+    sent += piece.length;
+    if (!response.write(piece)) { ffmpeg.stdout.pause(); response.once("drain", () => ffmpeg.stdout.resume()); }
+    if (sent >= limit) { response.end(); ffmpeg.kill(); }
+  });
+  ffmpeg.on("close", (code) => {
+    if (code && sent === 0) console.error(`[listen] FFmpeg no pudo leer el HLS: ${errors.trim().split("\n").at(-1) ?? code}`);
+    if (response.writableEnded) return;
+    // Si el MP3 sale algo más corto de lo calculado, se rellena con silencio
+    // para que el reproductor no se quede esperando bytes que no llegan.
+    if (total !== null && sent > 0 && sent < limit && limit - sent <= hlsBytesPerSecond * 30) response.write(Buffer.alloc(limit - sent));
+    response.end();
+  });
 }
 
 export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl: (value: unknown) => { url: string } | null }): Router {
@@ -444,6 +499,10 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
     const source = previews.get(String(request.params.token));
     if (!source || source.expires < Date.now()) {
       response.status(404).json({ error: "Vista previa caducada", message: "Vuelve a cargar la vista previa." });
+      return;
+    }
+    if (source.hls) {
+      streamHls(source, request, response);
       return;
     }
     let closed = false;

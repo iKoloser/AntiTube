@@ -1,3 +1,4 @@
+import { soundcloudTrackId, soundcloudTracks } from "./soundcloud.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
@@ -151,6 +152,22 @@ function extractorErrorMessage(error: unknown): string {
     : "No se pudieron obtener metadatos para esta URL.";
 }
 
+/** Completa título, artista, duración y portada de una playlist de SoundCloud. */
+async function withSoundCloudDetails(entries: MediaMetadataEntry[]): Promise<MediaMetadataEntry[]> {
+  try {
+    const ids = entries.map((entry) => soundcloudTrackId(entry.id, entry.sourceUrl));
+    const details = await soundcloudTracks(ids.filter((id): id is string => Boolean(id)));
+    return entries.map((entry, index) => {
+      const found = ids[index] ? details.get(ids[index] as string) : undefined;
+      if (!found) return entry;
+      return { ...entry, id: found.id, title: found.title, uploader: found.artist ?? entry.uploader, durationSeconds: found.durationSeconds ?? entry.durationSeconds, thumbnailUrl: found.thumbnailUrl ?? entry.thumbnailUrl, sourceUrl: found.url ?? entry.sourceUrl };
+    });
+  } catch (error) {
+    console.error(`[soundcloud] no se pudieron completar los datos de la playlist: ${error instanceof Error ? error.message : String(error)}`);
+    return entries;
+  }
+}
+
 /**
  * Consulta metadatos con yt-dlp. --skip-download garantiza que no se escriben
  * archivos multimedia ni se inicia una descarga.
@@ -171,7 +188,8 @@ export async function getMediaMetadata(url: string, timeoutMs: number, includePl
     );
 
     const parsed = JSON.parse(stdout) as YtDlpResult;
-    const entries = playlistEntries(parsed.entries);
+    let entries = playlistEntries(parsed.entries);
+    if (entries.length > 0 && /soundcloud/i.test(String(parsed.extractor_key ?? ""))) entries = await withSoundCloudDetails(entries);
     const isPlaylist = Array.isArray(parsed.entries);
     return {
       id: nullableString(parsed.id),
