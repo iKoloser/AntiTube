@@ -1,26 +1,34 @@
 import { randomUUID } from "node:crypto";
 import { Router, type Request, type Response } from "express";
 import { createPlaylistArchive } from "./archive.js";
+import path from "node:path";
 import {
+  audioFormats,
   buildOutputTemplate,
   DownloadAbortedError,
   DownloadLimitError,
   DownloadToolUnavailableError,
+  downloadFormats,
   downloadMedia,
+  FormatUnavailableError,
+  removeWorkDirectory,
   TemplateError,
   type AudioQuality,
   type DownloadFormat,
   type DownloadItemProgress,
   type DownloadProgress,
+  type DownloadSection,
   type Id3Overrides,
   type VideoQuality
 } from "./downloader.js";
-import { downloadDirectory } from "./settings.js";
+import { emitDesktopEvent } from "./events.js";
+import { downloadDirectory, maxConcurrentDownloads } from "./settings.js";
 
 /**
- * Cola de descargas: se procesan de una en una (la detección de archivos
- * generados se basa en los cambios de la carpeta), se pueden encolar sin
- * límite y cada una se puede pausar, reanudar o cancelar.
+ * Cola de descargas: se procesan varias a la vez (ajustable de 1 a 5). Cada
+ * tarea descarga en su propia carpeta de trabajo y al terminar mueve los
+ * archivos a la carpeta de descargas, así no se mezclan entre sí. Se pueden
+ * encolar sin límite y cada una se puede pausar, reanudar o cancelar.
  */
 
 export type Analysis = { url: string; domain: string; platform: string; videoOnly: boolean };
@@ -30,7 +38,7 @@ type JobStatus = "queued" | "downloading" | "paused" | "completed" | "failed" | 
 type JobOptions = {
   url: string;
   format: DownloadFormat;
-  quality: VideoQuality | AudioQuality;
+  quality: VideoQuality | AudioQuality | "best";
   playlist: boolean;
   playlistTotal: number | null;
   playlistTitle: string | null;
@@ -38,6 +46,7 @@ type JobOptions = {
   filenameTemplate: string | null;
   skipDuplicates: boolean;
   id3: Id3Overrides | null;
+  section: DownloadSection | null;
 };
 
 type DownloadJob = {
@@ -69,7 +78,15 @@ const maxFinishedJobs = 80;
 
 const jobs = new Map<string, DownloadJob>();
 const queue: DownloadJob[] = [];
-let active: DownloadJob | null = null;
+const active = new Set<DownloadJob>();
+
+function workDirectory(job: DownloadJob): string {
+  return path.join(downloadDirectory(), ".antitube-temp", job.id);
+}
+
+function announceQueue(): void {
+  emitDesktopEvent({ type: "queue", active: active.size, queued: queue.length });
+}
 
 function isFinished(job: DownloadJob): boolean {
   return job.status === "completed" || job.status === "failed" || job.status === "cancelled";
@@ -77,7 +94,7 @@ function isFinished(job: DownloadJob): boolean {
 
 function refreshQueueMessages(): void {
   queue.forEach((job, index) => {
-    job.progress = { ...job.progress, speed: null, eta: null, message: index === 0 && active ? "En cola: empieza en cuanto termine la descarga actual" : index === 0 ? "Empezando…" : `En cola: posición ${index + 1}` };
+    job.progress = { ...job.progress, speed: null, eta: null, message: active.size >= maxConcurrentDownloads() ? (index === 0 ? "En cola: empieza en cuanto termine otra descarga" : `En cola: posición ${index + 1}`) : "Empezando…" };
   });
 }
 
@@ -87,16 +104,33 @@ function pruneFinished(): void {
 }
 
 function pump(): void {
-  if (active) return;
-  const next = queue.shift();
+  while (active.size < maxConcurrentDownloads()) {
+    const next = queue.shift();
+    if (!next) break;
+    active.add(next);
+    void runJob(next).finally(() => {
+      active.delete(next);
+      pruneFinished();
+      notifyFinished(next);
+      pump();
+    });
+  }
   refreshQueueMessages();
-  if (!next) return;
-  active = next;
-  void runJob(next).finally(() => {
-    active = null;
-    pruneFinished();
-    pump();
-  });
+  announceQueue();
+}
+
+/** Vuelve a repartir la cola cuando cambia el número de descargas simultáneas. */
+export function rebalanceQueue(): void {
+  pump();
+}
+
+function notifyFinished(job: DownloadJob): void {
+  if (job.status === "completed") {
+    const files = job.result?.archive ? [job.result.archive.filename] : job.result?.files.map((file) => file.filename) ?? [];
+    emitDesktopEvent({ type: "job", status: "completed", title: job.title, message: job.result?.message ?? "Descarga completada", file: files[0] ?? null });
+  } else if (job.status === "failed") {
+    emitDesktopEvent({ type: "job", status: "failed", title: job.title, message: job.error?.message ?? "La descarga ha fallado." });
+  }
 }
 
 function log(job: DownloadJob, line: string): void {
@@ -123,6 +157,8 @@ async function runJob(job: DownloadJob): Promise<void> {
       filenameTemplate: options.filenameTemplate,
       skipDuplicates: options.skipDuplicates,
       id3: options.id3,
+      section: options.section,
+      workDirectory: workDirectory(job),
       signal: job.controller.signal,
       onProgress: (progress) => { job.progress = progress; },
       onLog: (line) => log(job, line),
@@ -139,6 +175,7 @@ async function runJob(job: DownloadJob): Promise<void> {
       }
     });
     job.skipped = result.skipped;
+    await removeWorkDirectory(workDirectory(job));
     if (result.files.length === 0) {
       job.result = { message: result.skipped === 1 ? "Ya lo habías descargado: se ha omitido el duplicado." : `Ya los habías descargado: se han omitido ${result.skipped} duplicados.`, files: [], format: result.format, isPlaylist: result.isPlaylist, maxPlaylistItems: 0 };
       job.status = "completed";
@@ -150,11 +187,14 @@ async function runJob(job: DownloadJob): Promise<void> {
       ? await createPlaylistArchive(downloadDirectory(), result.files.map((file) => file.filename), options.playlistTitle)
       : null;
     if (archiveFilename) log(job, `ZIP preparado: ${archiveFilename}`);
-    const skippedNote = result.skipped > 0 ? ` (${result.skipped} omitidas por estar ya descargadas)` : "";
+    const skippedNote = [
+      result.skipped > 0 ? `${result.skipped} omitidas por estar ya descargadas` : null,
+      result.unavailable > 0 ? `${result.unavailable} sin ${result.format.toUpperCase()} original en la fuente` : null
+    ].filter(Boolean).join(", ");
     job.result = {
       message: archiveFilename
-        ? `Playlist ${result.format.toUpperCase()} preparada: ${result.files.length} canciones${skippedNote}.`
-        : `Descarga ${result.format.toUpperCase()} completada: ${result.files.length} archivo(s)${skippedNote}.`,
+        ? `Playlist ${result.format.toUpperCase()} preparada: ${result.files.length} canciones${skippedNote ? ` (${skippedNote})` : ""}.`
+        : `Descarga ${result.format.toUpperCase()} completada: ${result.files.length} archivo(s)${skippedNote ? ` (${skippedNote})` : ""}.`,
       files: result.files.map((file) => ({ ...file, downloadUrl: `/api/downloads/${encodeURIComponent(file.filename)}` })),
       ...(archiveFilename ? { archive: { filename: archiveFilename, downloadUrl: `/api/downloads/${encodeURIComponent(archiveFilename)}`, count: result.files.length } } : {}),
       format: result.format,
@@ -169,11 +209,16 @@ async function runJob(job: DownloadJob): Promise<void> {
       job.status = paused ? "paused" : "cancelled";
       job.progress = { ...job.progress, speed: null, eta: null, message: paused ? "En pausa: al reanudar continúa donde se quedó" : "Cancelada" };
       log(job, paused ? "Descarga en pausa." : "Descarga cancelada.");
+      if (!paused) await removeWorkDirectory(workDirectory(job));
       return;
     }
     job.status = "failed";
     if (error instanceof DownloadToolUnavailableError) job.error = { error: "Herramienta no disponible", message: error.message };
     else if (error instanceof DownloadLimitError) job.error = { error: "Archivo demasiado grande", message: error.message };
+    else if (error instanceof FormatUnavailableError) {
+      job.error = { error: "Formato no disponible", message: error.message };
+      log(job, `ERROR: ${error.message}`);
+    }
     else {
       const message = error instanceof Error ? error.message : "Error inesperado durante la descarga.";
       job.error = { error: "Descarga fallida", message };
@@ -188,7 +233,7 @@ async function runJob(job: DownloadJob): Promise<void> {
 function publicJob(job: DownloadJob) {
   const { controller: _controller, options, stopReason: _stopReason, titleFromSource: _titleFromSource, ...rest } = job;
   const queuePosition = queue.indexOf(job);
-  return { ...rest, jobId: job.id, queuePosition: queuePosition >= 0 ? queuePosition + 1 : null, playlistItems: options.playlistItems, filenameTemplate: options.filenameTemplate };
+  return { ...rest, jobId: job.id, queuePosition: queuePosition >= 0 ? queuePosition + 1 : null, playlistItems: options.playlistItems, filenameTemplate: options.filenameTemplate, section: options.section };
 }
 
 function cleanId3(value: unknown): Id3Overrides | null {
@@ -200,19 +245,28 @@ function cleanId3(value: unknown): Id3Overrides | null {
   return Object.values(overrides).some(Boolean) ? overrides : null;
 }
 
-type ParsedRequest = { options: Omit<JobOptions, "url" | "playlist" | "playlistTotal" | "playlistTitle" | "playlistItems">; error?: string };
+type ParsedRequest = { options: Omit<JobOptions, "url" | "playlist" | "playlistTotal" | "playlistTitle" | "playlistItems" | "section">; error?: string };
+
+function parseSection(value: unknown): DownloadSection | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { start, end } = value as Record<string, unknown>;
+  const from = Number(start);
+  const to = Number(end);
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from < 0 || to - from < 0.5) return null;
+  return { start: Math.round(from * 100) / 100, end: Math.round(to * 100) / 100 };
+}
 
 function parseCommonOptions(body: Record<string, unknown>): ParsedRequest {
-  const format = body.format;
-  const quality = body.quality;
-  const validQuality = format === "mp4" ? validVideoQualities.includes(String(quality)) : format === "mp3" && validAudioQualities.includes(String(quality));
-  if ((format !== "mp4" && format !== "mp3") || !validQuality) {
-    return { options: null as never, error: "Elige un formato mp4/mp3 y una calidad compatible." };
+  const format = body.format as DownloadFormat;
+  const quality = format === "mp4" || format === "mp3" ? body.quality : "best";
+  const validQuality = format === "mp4" ? validVideoQualities.includes(String(quality)) : format === "mp3" ? validAudioQualities.includes(String(quality)) : true;
+  if (!downloadFormats.includes(format) || !validQuality) {
+    return { options: null as never, error: "Elige un formato (MP4, MP3, M4A, Opus o FLAC) y una calidad compatible." };
   }
   const filenameTemplate = typeof body.filenameTemplate === "string" && body.filenameTemplate.trim() ? body.filenameTemplate.trim() : null;
   try {
     buildOutputTemplate(filenameTemplate);
-    const id3 = format === "mp3" ? cleanId3(body.id3) : null;
+    const id3 = audioFormats.includes(format) ? cleanId3(body.id3) : null;
     return { options: { format, quality: quality as VideoQuality | AudioQuality, filenameTemplate, skipDuplicates: body.skipDuplicates !== false, id3 } };
   } catch (error) {
     return { options: null as never, error: error instanceof Error ? error.message : "Opciones no válidas." };
@@ -272,6 +326,7 @@ export function createJobsRouter(deps: { analyzeDownloadSource: (value: unknown)
       return;
     }
     const playlist = body.playlist === true;
+    const section = playlist ? null : parseSection(body.section);
     const requestedTotal = Number(body.playlistTotal);
     const playlistItems = playlist && Array.isArray(body.playlistItems)
       ? body.playlistItems.map(Number).filter((item) => Number.isInteger(item) && item > 0 && item <= deps.maxPlaylistItems).slice(0, deps.maxPlaylistItems)
@@ -282,7 +337,8 @@ export function createJobsRouter(deps: { analyzeDownloadSource: (value: unknown)
       playlist,
       playlistTotal: playlist && Number.isInteger(requestedTotal) && requestedTotal > 0 ? Math.min(requestedTotal, deps.maxPlaylistItems) : null,
       playlistTitle: typeof body.playlistTitle === "string" ? body.playlistTitle : null,
-      playlistItems: playlistItems && playlistItems.length > 0 ? playlistItems : null
+      playlistItems: playlistItems && playlistItems.length > 0 ? playlistItems : null,
+      section
     }, typeof body.title === "string" && body.title.trim() ? body.title.trim().slice(0, 200) : null);
     response.status(202).json(publicJob(job));
   });
@@ -304,7 +360,7 @@ export function createJobsRouter(deps: { analyzeDownloadSource: (value: unknown)
       if (!analysis) { rejected.push({ url, reason: "No es una URL válida" }); continue; }
       if (analysis.videoOnly && parsed.options.format !== "mp4") { rejected.push({ url, reason: `${analysis.platform} solo admite MP4` }); continue; }
       const playlist = body.allowPlaylists === true && looksLikePlaylist(analysis.url);
-      created.push(publicJob(enqueue(analysis, { ...parsed.options, url: analysis.url, playlist, playlistTotal: null, playlistTitle: null, playlistItems: null }, null)));
+      created.push(publicJob(enqueue(analysis, { ...parsed.options, url: analysis.url, playlist, playlistTotal: null, playlistTitle: null, playlistItems: null, section: null }, null)));
     }
     response.status(created.length > 0 ? 202 : 400).json({ created, rejected, message: created.length > 0 ? `${created.length} descarga(s) añadidas a la cola.` : "Ninguna URL era válida." });
   });
@@ -324,7 +380,7 @@ export function createJobsRouter(deps: { analyzeDownloadSource: (value: unknown)
       const { logs, ...rest } = publicJob(job);
       return { ...rest, lastLog: [...logs].reverse().find((line) => !line.includes("PROGRESS:")) ?? null };
     });
-    response.json({ jobs: list, active: list.filter((job) => job.status === "queued" || job.status === "downloading").length });
+    response.json({ jobs: list, active: list.filter((job) => job.status === "queued" || job.status === "downloading").length, maxConcurrent: maxConcurrentDownloads() });
   });
 
   router.post("/api/jobs/:jobId/pause", (request: Request, response: Response) => {
@@ -338,6 +394,7 @@ export function createJobsRouter(deps: { analyzeDownloadSource: (value: unknown)
       job.status = "paused";
       job.progress = { ...job.progress, message: "En pausa" };
       refreshQueueMessages();
+      announceQueue();
     } else {
       job.stopReason = "pause";
       job.controller?.abort();
@@ -375,7 +432,9 @@ export function createJobsRouter(deps: { analyzeDownloadSource: (value: unknown)
       job.status = "cancelled";
       job.finishedAt = Date.now();
       job.progress = { ...job.progress, message: "Cancelada" };
+      void removeWorkDirectory(workDirectory(job));
       refreshQueueMessages();
+      announceQueue();
     }
     response.json(publicJob(job));
   });
@@ -393,7 +452,9 @@ export function createJobsRouter(deps: { analyzeDownloadSource: (value: unknown)
     const index = queue.indexOf(job);
     if (index >= 0) queue.splice(index, 1);
     jobs.delete(job.id);
+    void removeWorkDirectory(workDirectory(job));
     refreshQueueMessages();
+    announceQueue();
     response.json({ removed: job.id });
   });
 

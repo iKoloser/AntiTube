@@ -9,8 +9,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { ExtractorLookupError, ExtractorUnavailableError, getMediaMetadata } from "./extractor.js";
 import { createAppUpdateRouter } from "./appUpdate.js";
-import { createJobsRouter } from "./jobs.js";
-import { defaultDownloadDirectory, downloadDirectory, loadSettings, setDownloadDirectory } from "./settings.js";
+import { createJobsRouter, rebalanceQueue } from "./jobs.js";
+import { createLibraryRouter } from "./library.js";
+import { createMediaRouter } from "./media.js";
+import { defaultDownloadDirectory, downloadDirectory, loadSettings, maxConcurrentDownloads, setDownloadDirectory, setMaxConcurrentDownloads } from "./settings.js";
 import { addToHistory, listHistory, removeFromHistory } from "./shazamHistory.js";
 import { checkUpdates, detectTools, runSetup, runUpdate, setupStatus, type SetupStepId } from "./setup.js";
 
@@ -218,6 +220,19 @@ app.get("/api/desktop/info", (_request: Request, response: Response) => {
   response.json({ desktop: desktopMode, downloadDirectory: downloadDirectory() });
 });
 
+/** Abre el explorador del sistema mostrando un archivo (o una carpeta). */
+function revealInExplorer(target: string, select: boolean): void {
+  if (process.platform === "win32") {
+    // explorer.exe necesita `/select,"ruta"` literal: el entrecomillado automático de Node
+    // envuelve el argumento entero y Explorer lo ignora cuando el nombre tiene espacios.
+    const explorerArgument = select ? `/select,"${target}"` : `"${target}"`;
+    spawn("explorer.exe", [explorerArgument], { windowsVerbatimArguments: true, detached: true, stdio: "ignore" }).on("error", (error) => console.error(`[open] ${error.message}`)).unref();
+    return;
+  }
+  if (process.platform === "darwin") execFile("open", select ? ["-R", target] : [target], () => undefined);
+  else execFile("xdg-open", [select ? path.dirname(target) : target], () => undefined);
+}
+
 // Abre la carpeta de descargas (y selecciona el archivo si se indica) en el explorador del sistema.
 app.post("/api/desktop/open", (request: Request, response: Response) => {
   if (!desktopMode) {
@@ -230,21 +245,7 @@ app.post("/api/desktop/open", (request: Request, response: Response) => {
   // Si el archivo ya no existe (o se renombró), abrimos al menos la carpeta.
   const reveal = Boolean(filePath && existsSync(filePath));
   const target = reveal && filePath ? filePath : downloadDirectory();
-  const [command, args] = process.platform === "win32"
-    ? ["explorer.exe", [target]]
-    : process.platform === "darwin"
-      ? ["open", reveal ? ["-R", target] : [target]]
-      : ["xdg-open", [downloadDirectory()]];
-  void mkdir(downloadDirectory(), { recursive: true }).then(() => {
-    if (process.platform === "win32") {
-      // explorer.exe necesita `/select,"ruta"` literal: el entrecomillado automático de Node
-      // envuelve el argumento entero y Explorer lo ignora cuando el nombre tiene espacios.
-      const explorerArgument = reveal ? `/select,"${target}"` : `"${target}"`;
-      spawn("explorer.exe", [explorerArgument], { windowsVerbatimArguments: true, detached: true, stdio: "ignore" }).on("error", (error) => console.error(`[open] ${error.message}`)).unref();
-      return;
-    }
-    execFile(command, args, () => undefined);
-  });
+  void mkdir(downloadDirectory(), { recursive: true }).then(() => revealInExplorer(target, reveal));
   response.json({ opened: target });
 });
 
@@ -395,17 +396,25 @@ app.post("/api/analyze", (request: Request, response: Response) => {
 });
 
 app.use(createJobsRouter({ analyzeDownloadSource, maxPlaylistItems }));
+app.use(createMediaRouter({ metadataTimeoutMs, analyzeUrl }));
+app.use(createLibraryRouter({ reveal: (filePath) => revealInExplorer(filePath, true) }));
 app.use(createAppUpdateRouter());
 
 app.get("/api/settings", (_request: Request, response: Response) => {
-  response.json({ downloadDirectory: downloadDirectory(), defaultDownloadDirectory: defaultDownloadDirectory() });
+  response.json({ downloadDirectory: downloadDirectory(), defaultDownloadDirectory: defaultDownloadDirectory(), maxConcurrent: maxConcurrentDownloads() });
+});
+
+app.post("/api/settings/concurrency", async (request: Request, response: Response) => {
+  const value = await setMaxConcurrentDownloads(Number(request.body?.maxConcurrent));
+  rebalanceQueue();
+  response.json({ maxConcurrent: value });
 });
 
 app.post("/api/settings", async (request: Request, response: Response) => {
   const value = request.body?.downloadDirectory;
   try {
     const directory = await setDownloadDirectory(typeof value === "string" && value.trim() ? value : null);
-    response.json({ downloadDirectory: directory, defaultDownloadDirectory: defaultDownloadDirectory() });
+    response.json({ downloadDirectory: directory, defaultDownloadDirectory: defaultDownloadDirectory(), maxConcurrent: maxConcurrentDownloads() });
   } catch (error) {
     response.status(400).json({ error: "Carpeta no válida", message: error instanceof Error ? error.message : "No se pudo usar esa carpeta." });
   }
@@ -428,7 +437,7 @@ app.delete("/api/shazam/history", async (_request: Request, response: Response) 
 app.get("/api/downloads/:filename", (request: Request, response: Response) => {
   const rawFilename = request.params.filename;
   const filename = typeof rawFilename === "string" ? path.basename(rawFilename) : "";
-  if (!filename || filename !== rawFilename || !/\.(mp3|mp4|zip)$/i.test(filename)) {
+  if (!filename || filename !== rawFilename || !/\.(mp3|mp4|m4a|opus|flac|zip)$/i.test(filename)) {
     response.status(400).json({ error: "Archivo inválido", message: "El archivo solicitado no es válido." });
     return;
   }
@@ -445,6 +454,8 @@ if (desktopMode) {
   process.stdin.resume();
   void detectTools();
   void loadSettings().finally(() => {
+    // Restos de descargas interrumpidas al cerrar la app.
+    void rm(path.join(downloadDirectory(), ".antitube-temp"), { recursive: true, force: true }).catch(() => undefined);
     app.listen(port, "127.0.0.1", () => {
       console.log(`ANTITUBE_READY http://127.0.0.1:${port}`);
     });

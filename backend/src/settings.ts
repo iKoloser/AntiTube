@@ -4,14 +4,40 @@ import { constants } from "node:fs";
 import path from "node:path";
 
 /**
- * Ajustes persistentes del usuario (de momento, la carpeta de descargas).
+ * Ajustes persistentes del usuario: carpeta de descargas y descargas simultáneas.
  * Se guardan en settings.json dentro de la carpeta de datos de la app.
  */
 
-type Settings = { downloadDirectory?: string };
+type Settings = { downloadDirectory?: string; maxConcurrent?: number };
 
 const defaultDirectory = path.resolve(process.cwd(), process.env.DOWNLOAD_DIR ?? "../downloads");
 let currentDirectory = defaultDirectory;
+let currentMaxConcurrent = 3;
+
+export function maxConcurrentDownloads(): number {
+  return currentMaxConcurrent;
+}
+
+async function readSettings(): Promise<Settings> {
+  try {
+    return JSON.parse(await readFile(settingsPath(), "utf8")) as Settings;
+  } catch {
+    return {};
+  }
+}
+
+async function saveSettings(patch: Partial<Settings>): Promise<void> {
+  const next = { ...(await readSettings()), ...patch };
+  await mkdir(path.dirname(settingsPath()), { recursive: true });
+  await writeFile(settingsPath(), JSON.stringify(next, null, 2));
+}
+
+/** Cuántas descargas se hacen a la vez (1-5). */
+export async function setMaxConcurrentDownloads(value: number): Promise<number> {
+  currentMaxConcurrent = Math.min(5, Math.max(1, Math.round(value) || 1));
+  await saveSettings({ maxConcurrent: currentMaxConcurrent });
+  return currentMaxConcurrent;
+}
 
 function settingsPath(): string {
   return path.join(path.resolve(process.env.ANTITUBE_DATA_DIR ?? path.join(defaultDirectory, ".antitube")), "settings.json");
@@ -32,12 +58,9 @@ function apply(directory: string): void {
 }
 
 export async function loadSettings(): Promise<void> {
-  try {
-    const settings = JSON.parse(await readFile(settingsPath(), "utf8")) as Settings;
-    if (settings.downloadDirectory && existsSync(settings.downloadDirectory)) apply(settings.downloadDirectory);
-  } catch {
-    // Sin ajustes guardados: se usa la carpeta por defecto.
-  }
+  const settings = await readSettings();
+  if (settings.downloadDirectory && existsSync(settings.downloadDirectory)) apply(settings.downloadDirectory);
+  if (typeof settings.maxConcurrent === "number") currentMaxConcurrent = Math.min(5, Math.max(1, Math.round(settings.maxConcurrent)));
 }
 
 /** Cambia la carpeta de descargas comprobando que existe (o se puede crear) y que se puede escribir. */
@@ -54,7 +77,6 @@ export async function setDownloadDirectory(value: string | null): Promise<string
     throw new Error("No se puede escribir en esa carpeta. Elige otra.");
   }
   apply(directory);
-  await mkdir(path.dirname(settingsPath()), { recursive: true });
-  await writeFile(settingsPath(), JSON.stringify({ downloadDirectory: value ? directory : undefined } satisfies Settings, null, 2));
+  await saveSettings({ downloadDirectory: value ? directory : undefined });
   return directory;
 }
