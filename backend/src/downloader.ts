@@ -71,7 +71,9 @@ export class FormatUnavailableError extends Error {}
 
 const defaultMaxBytes = 500 * 1024 * 1024;
 
-function maxDownloadBytes(): number {
+/** Tamaño máximo por archivo. En la app de escritorio no hay límite (salvo que se configure MAX_DOWNLOAD_BYTES). */
+function maxDownloadBytes(): number | null {
+  if (process.env.MAX_DOWNLOAD_BYTES === undefined && process.env.ANTITUBE_DESKTOP === "1") return null;
   const configured = Number(process.env.MAX_DOWNLOAD_BYTES ?? defaultMaxBytes);
   return Number.isSafeInteger(configured) && configured > 0 ? configured : defaultMaxBytes;
 }
@@ -255,6 +257,7 @@ export async function downloadMedia(options: DownloadOptions): Promise<DownloadR
   const selectedItems = playlist && options.playlistItems?.length ? [...new Set(options.playlistItems)].filter((item) => Number.isInteger(item) && item > 0).sort((a, b) => a - b) : null;
   const section = !playlist && options.section && options.section.end > options.section.start ? options.section : null;
 
+  const maxBytes = maxDownloadBytes();
   const args = [
     playlist ? "--yes-playlist" : "--no-playlist",
     ...(playlist ? (selectedItems ? ["--playlist-items", selectedItems.join(",")] : ["--playlist-end", String(maxPlaylistItems()), "--lazy-playlist"]) : []),
@@ -264,7 +267,7 @@ export async function downloadMedia(options: DownloadOptions): Promise<DownloadR
     "--no-overwrites",
     "--continue",
     "--concurrent-fragments", "4",
-    "--max-filesize", `${Math.max(1, Math.floor(maxDownloadBytes() / (1024 * 1024)))}M`,
+    ...(maxBytes ? ["--max-filesize", `${Math.max(1, Math.floor(maxBytes / (1024 * 1024)))}M`] : []),
     "--newline",
     "--js-runtimes", jsRuntime,
     "--progress-template", "download:PROGRESS:%(info.playlist_index)s|%(info.n_entries)s|%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta)s|%(info.title)s",
@@ -294,6 +297,7 @@ export async function downloadMedia(options: DownloadOptions): Promise<DownloadR
   const ytdlpBinary = process.env.YTDLP_BIN ?? "yt-dlp";
   let skipped = 0;
   let unavailable = 0;
+  let sawSizeLimit = false;
   const items = new Map<number, DownloadItemProgress>();
 
   try {
@@ -321,7 +325,7 @@ export async function downloadMedia(options: DownloadOptions): Promise<DownloadR
         reject(new DownloadAbortedError("Descarga detenida."));
       };
       signal?.addEventListener("abort", onAbort, { once: true });
-      const timeout = setTimeout(() => killTree(child), Number(process.env.DOWNLOAD_TIMEOUT_MS ?? 30 * 60 * 1000));
+      const timeout = setTimeout(() => killTree(child), Number(process.env.DOWNLOAD_TIMEOUT_MS ?? (process.env.ANTITUBE_DESKTOP === "1" ? 6 * 60 * 60 * 1000 : 30 * 60 * 1000)));
       const consume = (chunk: Buffer, isError = false) => {
         const text = chunk.toString();
         if (isError) errorOutput += text;
@@ -335,6 +339,7 @@ export async function downloadMedia(options: DownloadOptions): Promise<DownloadR
             if (currentIndex !== null) finishItem(currentIndex, "skipped");
           }
           if (/Requested format is not available/i.test(cleanLine)) unavailable += 1;
+          if (/larger than max-filesize/i.test(cleanLine)) sawSizeLimit = true;
           const markerIndex = line.indexOf("PROGRESS:");
           if (markerIndex < 0) continue;
           const [rawCurrent, rawTotal, rawPercent, rawSpeed, rawEta, ...titleParts] = line.slice(markerIndex + "PROGRESS:".length).split("|");
@@ -393,12 +398,13 @@ export async function downloadMedia(options: DownloadOptions): Promise<DownloadR
     const workFiles = await finishedWorkFiles(workDirectory, format);
     if (workFiles.length === 0 && skipped > 0) return { files: [], format, isPlaylist: playlist, skipped, unavailable };
     if (workFiles.length === 0 && unavailable > 0) throw new FormatUnavailableError(formatUnavailableMessage(format));
+    if (workFiles.length === 0 && sawSizeLimit && maxBytes) throw new DownloadLimitError(`El archivo supera el tamaño máximo permitido (${Math.round(maxBytes / (1024 * 1024))} MB).`);
     if (workFiles.length === 0) throw new DownloadFailedError("yt-dlp no devolvió ningún archivo generado.");
 
     const files = [];
     for (const workFile of workFiles) {
       const fileInfo = await stat(workFile);
-      if (fileInfo.size > maxDownloadBytes()) {
+      if (maxBytes && fileInfo.size > maxBytes) {
         throw new DownloadLimitError("Uno de los archivos supera el límite configurado de tamaño.");
       }
       if (section && format === "flac") {

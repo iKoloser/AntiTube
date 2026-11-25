@@ -490,6 +490,21 @@ export function runUpdate(id: SetupStepId): boolean {
   return true;
 }
 
+/**
+ * YouTube cambia a menudo su reproductor y solo la última versión de yt-dlp sabe
+ * resolver sus retos («n challenge»). Al arrancar, si hay una versión nueva de la
+ * copia de yt-dlp que gestiona AntiTube, se instala sola en segundo plano.
+ */
+export async function autoUpdateYtDlp(): Promise<void> {
+  if (steps.ytdlp.status !== "done" || steps.ytdlp.source !== "managed") return;
+  try {
+    updates.ytdlp = await checkYtDlpUpdate();
+  } catch {
+    return;
+  }
+  if (updates.ytdlp?.available && updates.ytdlp.canUpdate) runUpdate("ytdlp");
+}
+
 export function setupStatus() {
   const list = [steps.engine, steps.ytdlp, steps.ffmpeg, steps.shazam].map((step) => ({ ...step, update: updates[step.id] ?? null }));
   const ready = steps.ytdlp.status === "done" && steps.ffmpeg.status === "done";
