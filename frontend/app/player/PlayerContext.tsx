@@ -248,7 +248,7 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
     .join("\n");
   useEffect(() => {
     if (!nearbyStreams) return;
-    const timer = window.setTimeout(() => nearbyStreams.split("\n").forEach(warmStream), 300);
+    const timer = window.setTimeout(() => nearbyStreams.split("\n").forEach((url) => warmStream(url)), 300);
     return () => window.clearTimeout(timer);
   }, [nearbyStreams]);
 
@@ -630,11 +630,11 @@ export function streamTrack(url: string, meta: { title: string; artist: string |
 const warmed = new Map<string, number>();
 
 /** Pide al motor que deje listo el audio de una canción en streaming (sin reproducirla). */
-export function warmStream(url: string) {
+export function warmStream(url: string, urgent = false) {
   const last = warmed.get(url);
   if (last && Date.now() - last < 60 * 60 * 1000) return;
   warmed.set(url, Date.now());
-  void fetch(`${apiUrl()}/api/listen?url=${encodeURIComponent(url)}&warm=1`, { credentials: "include" }).catch(() => warmed.delete(url));
+  void fetch(`${apiUrl()}/api/listen?url=${encodeURIComponent(url)}&warm=1${urgent ? "&now=1" : ""}`, { credentials: "include" }).catch(() => warmed.delete(url));
 }
 
 export { apiUrl };

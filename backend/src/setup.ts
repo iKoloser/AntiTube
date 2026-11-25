@@ -111,12 +111,30 @@ async function versionOf(binary: string, args: string[], pattern?: RegExp): Prom
 
 // ---------- yt-dlp ----------
 
-function managedYtDlp(): string {
+// En Windows se usa la versión «en carpeta» de yt-dlp (yt-dlp_win.zip): arranca
+// en una fracción de segundo, mientras que el .exe de un solo archivo se
+// descomprime entero en cada uso. Eso se nota en cada canción en streaming.
+function ytDlpFolder(): string {
+  return path.join(toolsDirectory(), "yt-dlp-win");
+}
+
+function legacyYtDlp(): string {
   return path.join(toolsDirectory(), exe("yt-dlp"));
+}
+
+function managedYtDlp(): string {
+  if (isWindows && (existsSync(path.join(ytDlpFolder(), "yt-dlp.exe")) || !existsSync(legacyYtDlp()))) return path.join(ytDlpFolder(), "yt-dlp.exe");
+  return legacyYtDlp();
+}
+
+/** yt-dlp de AntiTube instalado como .exe único (versiones anteriores): se cambia por la carpeta. */
+function hasLegacyWindowsYtDlp(): boolean {
+  return isWindows && steps.ytdlp.source === "managed" && managedYtDlp() === legacyYtDlp();
 }
 
 function ytDlpDownloadUrl(): string | null {
   const base = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/";
+  if (isWindows && process.arch === "x64") return `${base}yt-dlp_win.zip`;
   if (isWindows) return `${base}yt-dlp.exe`;
   if (isMac) return `${base}yt-dlp_macos`;
   if (process.platform === "linux" && process.arch === "x64") return `${base}yt-dlp_linux`;
@@ -137,7 +155,7 @@ async function detectYtDlp(): Promise<boolean> {
       return true;
     }
   }
-  update("ytdlp", { status: "pending", version: null, source: null, detail: "No instalado. Se descargará (unos 18 MB)." });
+  update("ytdlp", { status: "pending", version: null, source: null, detail: isWindows ? "No instalado. Se descargará (unos 25 MB)." : "No instalado. Se descargará (unos 18 MB)." });
   return false;
 }
 
@@ -145,8 +163,27 @@ async function installYtDlp(): Promise<void> {
   const url = ytDlpDownloadUrl();
   if (!url) throw new Error("No hay una versión de yt-dlp para este sistema. Instálalo manualmente.");
   update("ytdlp", { status: "running", detail: "Descargando yt-dlp…", percent: 0 });
-  await downloadFile(url, managedYtDlp(), (percent, label) => update("ytdlp", { percent, detail: `Descargando yt-dlp… ${label}` }));
-  if (!isWindows) await chmod(managedYtDlp(), 0o755);
+  if (url.endsWith(".zip")) {
+    const workDirectory = path.join(toolsDirectory(), ".yt-dlp-download");
+    const archivePath = path.join(workDirectory, "yt-dlp.zip");
+    const extractDirectory = path.join(workDirectory, "extract");
+    await rm(workDirectory, { recursive: true, force: true });
+    await mkdir(extractDirectory, { recursive: true });
+    try {
+      await downloadFile(url, archivePath, (percent, label) => update("ytdlp", { percent, detail: `Descargando yt-dlp… ${label}` }));
+      update("ytdlp", { detail: "Descomprimiendo…", percent: null });
+      await execFileAsync("tar", ["-xf", archivePath, "-C", extractDirectory], { timeout: 300_000, windowsHide: true });
+      if (!existsSync(path.join(extractDirectory, "yt-dlp.exe"))) throw new Error("El archivo descargado no contiene yt-dlp.exe.");
+      await rm(ytDlpFolder(), { recursive: true, force: true });
+      await rename(extractDirectory, ytDlpFolder());
+      await rm(legacyYtDlp(), { force: true }).catch(() => undefined);
+    } finally {
+      await rm(workDirectory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  } else {
+    await downloadFile(url, legacyYtDlp(), (percent, label) => update("ytdlp", { percent, detail: `Descargando yt-dlp… ${label}` }));
+    if (!isWindows) await chmod(legacyYtDlp(), 0o755);
+  }
   update("ytdlp", { detail: "Verificando…", percent: 100 });
   if (!(await detectYtDlp())) throw new Error("yt-dlp se descargó pero no se pudo ejecutar.");
 }
@@ -461,7 +498,8 @@ async function applyUpdate(id: SetupStepId): Promise<void> {
   try {
     if (id === "ytdlp") {
       update("ytdlp", { status: "running", detail: "Actualizando yt-dlp…", percent: null });
-      if (steps.ytdlp.source === "managed") await runLogged(managedYtDlp(), ["-U"], "ytdlp");
+      // La versión en carpeta de Windows no se actualiza sola con -U: se descarga de nuevo.
+      if (steps.ytdlp.source === "managed" && managedYtDlp() === legacyYtDlp() && !isWindows) await runLogged(managedYtDlp(), ["-U"], "ytdlp");
       else await installYtDlp();
       await detectYtDlp();
     } else if (id === "ffmpeg") {
@@ -510,6 +548,7 @@ export async function autoUpdateTools(): Promise<void> {
     // FFmpeg del sistema: solo se cambia por la copia propia si el usuario lo pide.
     return !(id === "ffmpeg" && steps.ffmpeg.source !== "managed");
   });
+  if (hasLegacyWindowsYtDlp() && !pending.includes("ytdlp")) pending.unshift("ytdlp");
   if (pending.length === 0 || running) return;
   running = true;
   try {

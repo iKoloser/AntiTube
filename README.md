@@ -29,7 +29,7 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 ### Buscar y descargar
 
 - **Buscador integrado** en YouTube, YouTube Music, Bandcamp, Audius y SoundCloud. Se buscan varias plataformas a la vez y cada resultado se puede escuchar, ver, abrir con todas las opciones o mandar directo a la cola.
-- **Escuchar en streaming sin descargar:** «Escuchar» reproduce solo el audio al momento y sigue con el resto de resultados como una cola; «Escuchar todo» los pone todos, ＋ añade uno a la cola y una playlist pegada también se puede escuchar entera. Los primeros resultados y las canciones de alrededor en la cola se preparan por adelantado, así que suenan al pulsar y no hay silencios al cambiar. Lo que no tiene audio directo (solo HLS, enlaces que la plataforma rechaza…) se escucha igualmente a través de yt-dlp y FFmpeg.
+- **Escuchar en streaming sin descargar:** «Escuchar» reproduce solo el audio al momento y sigue con el resto de resultados como una cola; «Escuchar todo» los pone todos, ＋ añade uno a la cola y una playlist pegada también se puede escuchar entera. Suena mientras carga, como en YouTube o Spotify. Los primeros resultados (y el que tienes bajo el ratón) y las canciones de alrededor en la cola se preparan por adelantado, así que suenan al pulsar y no hay silencios al cambiar. Lo que no tiene audio directo (solo HLS, enlaces que la plataforma rechaza…) se escucha igualmente a través de yt-dlp y FFmpeg.
 - **Pega cualquier enlace** de los más de 1.000 sitios que soporta yt-dlp: YouTube, TikTok, Twitch, Twitter/X, Vimeo, Instagram, Reddit, Bilibili y más.
 - **Formatos de audio reales**, sin conversiones que empeoren el sonido:
   - **M4A (AAC)** y **OPUS** se guardan tal cual los emite la plataforma.
@@ -61,7 +61,7 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 - **Cerrar a la bandeja:** al cerrar la ventana, las descargas siguen. Se puede desactivar en Ajustes.
 - **Instancia única:** si abres AntiTube otra vez, se muestra la ventana que ya estaba abierta.
 - **Actualizaciones de la app** desde la propia app: avisa de cada versión nueva, enseña sus novedades y se instala con un clic.
-- **Herramientas siempre al día:** yt-dlp, FFmpeg y ShazamIO se instalan solos en el primer arranque y se actualizan al abrir la app. No hace falta tocar nada fuera de AntiTube.
+- **Herramientas siempre al día:** yt-dlp, FFmpeg y ShazamIO se instalan solos en el primer arranque y se actualizan al abrir la app. No hace falta tocar nada fuera de AntiTube. En Windows se usa la versión «en carpeta» de yt-dlp, que arranca mucho más rápido que el .exe único.
 
 ### SHAZAM
 
