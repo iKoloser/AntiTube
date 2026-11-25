@@ -245,6 +245,31 @@ async function resolvePreview(url: string, kind: PreviewKind, timeoutMs: number)
   return { ...common, source: { url: chosen.url, headers: headersOf(chosen) }, audio: null, hasVideo: kind !== "audio" && hasVideoTrack(chosen) };
 }
 
+// URL original → token de audio ya resuelto (las URLs directas caducan en unas horas).
+const listenCache = new Map<string, { token: string; expires: number }>();
+const listenPending = new Map<string, Promise<string>>();
+const listenLifetimeMs = 2 * 60 * 60 * 1000;
+
+async function listenToken(url: string, timeoutMs: number): Promise<string> {
+  const cached = listenCache.get(url);
+  if (cached && cached.expires > Date.now() && previews.has(cached.token)) return cached.token;
+  const pending = listenPending.get(url);
+  if (pending) return pending;
+  const job = (async () => {
+    const resolved = await resolvePreview(url, "audio", timeoutMs);
+    if (!resolved) throw new Error("Sin audio directo");
+    prunePreviews();
+    const token = randomUUID();
+    const expires = Date.now() + listenLifetimeMs;
+    previews.set(token, { ...resolved.source, expires: expires + 60 * 60 * 1000 });
+    listenCache.set(url, { token, expires });
+    if (listenCache.size > 500) listenCache.delete(listenCache.keys().next().value as string);
+    return token;
+  })().finally(() => listenPending.delete(url));
+  listenPending.set(url, job);
+  return job;
+}
+
 export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl: (value: unknown) => { url: string } | null }): Router {
   const router = Router();
 
@@ -305,6 +330,28 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
         return;
       }
       response.status(422).json({ error: "Sin vista previa", message: "No se pudo preparar la vista previa de este contenido." });
+    }
+  });
+
+  // Escuchar en streaming sin descargar: el reproductor usa esta URL fija como
+  // fuente. La primera vez resuelve el audio con yt-dlp (y lo recuerda un rato);
+  // después redirige al reenvío con rangos de arriba. Con `warm=1` solo lo
+  // prepara, para que la siguiente canción de la cola empiece al instante.
+  router.get("/api/listen", async (request: Request, response: Response) => {
+    const analysis = deps.analyzeUrl(request.query.url);
+    if (!analysis) {
+      response.status(400).json({ error: "URL inválida", message: "Falta la URL que quieres escuchar." });
+      return;
+    }
+    try {
+      const token = await listenToken(analysis.url, deps.metadataTimeoutMs);
+      if (request.query.warm === "1") { response.status(204).end(); return; }
+      response.setHeader("Cache-Control", "no-store");
+      response.redirect(302, `/api/preview/stream/${token}`);
+    } catch (error) {
+      console.error(`[listen] ${error instanceof Error ? error.message : String(error)}`);
+      const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : null;
+      response.status(code === "ENOENT" ? 503 : 422).json({ error: "No se puede escuchar", message: code === "ENOENT" ? "yt-dlp no está instalado en este entorno." : "No se pudo preparar el audio de este contenido." });
     }
   });
 

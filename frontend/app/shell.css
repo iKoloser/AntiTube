@@ -825,3 +825,9 @@ html[data-motion="off"] .omnibox::before { animation: none; }
 @keyframes boot-scan { from { transform: translateX(-100%); } to { transform: translateX(340%); } }
 @keyframes boot-logo-in { from { opacity: 0; transform: translateY(10px) scale(.96); filter: blur(4px); } }
 :root[data-motion="off"] .boot-ring-outer, :root[data-motion="off"] .boot-ring-inner, :root[data-motion="off"] .boot-rule i { animation: none; }
+
+/* ---------- Escuchar en streaming ---------- */
+.search-listen-all { margin-left: auto; }
+.search-actions .search-enqueue { width: 28px; height: 28px; min-height: 28px; border: 1px solid var(--border-strong); border-radius: 999px; }
+.search-item.is-playing { border-color: rgb(var(--accent-rgb) / 0.55); background: rgb(var(--accent-rgb) / 0.08); box-shadow: inset 3px 0 0 var(--accent); }
+.search-item.is-playing .search-thumb-play { opacity: 1; }

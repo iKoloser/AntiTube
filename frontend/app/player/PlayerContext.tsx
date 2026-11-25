@@ -240,6 +240,15 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
     }
   }, [currentSrc, current?.durationSeconds, ensureGraph]);
 
+  // Prepara en el motor la siguiente canción en streaming para que no haya silencio entre canciones.
+  const upcoming = queue[index + 1];
+  const upcomingStream = upcoming?.id.startsWith("listen:") ? upcoming.src : null;
+  useEffect(() => {
+    if (!upcomingStream || !current) return;
+    const timer = window.setTimeout(() => { void fetch(`${absolute(upcomingStream)}&warm=1`, { credentials: "include" }).catch(() => undefined); }, 4000);
+    return () => window.clearTimeout(timer);
+  }, [upcomingStream, current]);
+
   const next = useCallback((auto = false) => {
     const { queue: list, index: position, settings: options } = stateRef.current;
     if (list.length === 0) return;
@@ -276,7 +285,15 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
     const onError = () => {
       setLoading(false);
       if (!audio.getAttribute("src")) return;
-      setError("No se puede reproducir este archivo. Puede que se haya movido o que esté dañado.");
+      const { queue: list, index: position } = stateRef.current;
+      const failed = list[position];
+      if (failed?.id.startsWith("listen:")) {
+        // En streaming, una canción que no se puede sacar no corta la cola.
+        setError(`No se pudo escuchar «${failed.title}» en streaming.`);
+        if (position + 1 < list.length) { window.setTimeout(() => next(true), 1200); return; }
+      } else {
+        setError("No se puede reproducir este archivo. Puede que se haya movido o que esté dañado.");
+      }
       setPlaying(false);
     };
     audio.addEventListener("timeupdate", onTime);
@@ -578,6 +595,28 @@ export async function previewTrack(url: string, fallback: { title: string; artis
     cover: fallback.cover ?? data.thumbnailUrl,
     src: data.streamUrl,
     kind: kind === "video" && data.hasVideo ? "video" : "audio",
+    format: "STREAM",
+    lossless: false,
+    needsTranscode: false,
+    sourceUrl: url
+  };
+}
+
+/**
+ * Canción de internet para escuchar en streaming (solo audio, sin descargar).
+ * No espera a nada: el motor resuelve el audio cuando el reproductor lo pide,
+ * así que sirve para montar colas enteras de resultados al instante.
+ */
+export function streamTrack(url: string, meta: { title: string; artist: string | null; cover: string | null; durationSeconds: number | null }): PlayerTrack {
+  return {
+    id: `listen:${url}`,
+    title: meta.title,
+    artist: meta.artist,
+    album: "Streaming",
+    durationSeconds: meta.durationSeconds,
+    cover: meta.cover,
+    src: `/api/listen?url=${encodeURIComponent(url)}`,
+    kind: "audio",
     format: "STREAM",
     lossless: false,
     needsTranscode: false,

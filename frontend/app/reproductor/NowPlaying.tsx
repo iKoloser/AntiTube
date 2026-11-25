@@ -168,7 +168,7 @@ export default function NowPlaying({ cinema = false, onCinema }: Readonly<{ cine
       <span className="np-kicker">{playing ? "// reproduciendo" : current ? "// en pausa" : "// sin reproducir"}</span>
       <h2 title={current?.title}>{current?.title ?? "Elige algo que escuchar"}</h2>
       <p>{current ? [current.artist ?? "Artista desconocido", current.album].filter(Boolean).join(" · ") : "Haz doble clic en una canción, o arrástrala a la cola."}</p>
-      {current && <div className="np-chips">{current.format && <em className={`format-chip${current.lossless ? " is-lossless" : ""}`}>{current.format}</em>}{current.lossless && <em className="format-chip is-lossless">SIN PÉRDIDA</em>}{current.needsTranscode && <em className="format-chip" title="El motor lo descodifica a FLAC sin pérdida para poder reproducirlo">DESCODIFICADO</em>}{isVideo && <em className="format-chip is-video">VÍDEO</em>}{current.id.startsWith("stream:") && <em className="format-chip is-stream">STREAMING</em>}</div>}
+      {current && <div className="np-chips">{current.format && <em className={`format-chip${current.lossless ? " is-lossless" : ""}`}>{current.format}</em>}{current.lossless && <em className="format-chip is-lossless">SIN PÉRDIDA</em>}{current.needsTranscode && <em className="format-chip" title="El motor lo descodifica a FLAC sin pérdida para poder reproducirlo">DESCODIFICADO</em>}{isVideo && <em className="format-chip is-video">VÍDEO</em>}{(current.id.startsWith("stream:") || current.id.startsWith("listen:")) && <em className="format-chip is-stream">STREAMING</em>}</div>}
     </div>
     <div className="np-seek">
       <SeekBar time={player.time} duration={player.duration} buffered={player.buffered} onSeek={player.seek} className="is-large" />
