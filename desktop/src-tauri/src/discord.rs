@@ -11,7 +11,7 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 /// Id de la aplicación «AntiTube» en el portal de desarrolladores de Discord.
-const APP_ID: &str = "";
+const APP_ID: &str = "1575163968648122408";
 
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
