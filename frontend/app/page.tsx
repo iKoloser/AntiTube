@@ -5,7 +5,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import AdvancedOptions, { useDownloadPrefs } from "./DownloadPrefs";
 import BatchPanel from "./BatchPanel";
 import FormatPicker, { type AudioAvailability, type DownloadFormat } from "./FormatPicker";
-import { previewTrack, streamTrack, usePlayer } from "./player/PlayerContext";
+import { previewTrack, streamTrack, usePlayer, warmStream } from "./player/PlayerContext";
 import { formatTime } from "./player/types";
 import { apiUrl, isDesktop, revealDownload } from "./runtime";
 import SearchResults, { providers, type SearchProvider } from "./SearchResults";
@@ -15,7 +15,7 @@ import { useToast } from "./shell/Toasts";
 import Trimmer, { type Section } from "./Trimmer";
 
 type AnalysisResponse = { message: string; analysis: { url: string; domain: string; platform: string; videoOnly: boolean } };
-type PlaylistEntry = { index: number; id: string | null; title: string; sourceUrl: string | null; durationSeconds: number | null; thumbnailUrl: string | null };
+type PlaylistEntry = { index: number; id: string | null; title: string; uploader?: string | null; sourceUrl: string | null; durationSeconds: number | null; thumbnailUrl: string | null };
 type MetadataResponse = AnalysisResponse & { metadata: { title: string | null; uploader: string | null; durationSeconds: number | null; extractor: string | null; thumbnailUrl: string | null; sourceUrl: string; isPlaylist: boolean; playlistTitle: string | null; playlistCount: number | null; playlistEntries: PlaylistEntry[]; audio: AudioAvailability } };
 type DownloadResponse = { message: string; format: DownloadFormat; isPlaylist: boolean; files: Array<{ filename: string; format: DownloadFormat; downloadUrl: string }>; archive?: { filename: string; downloadUrl: string; count: number } };
 type DownloadJobResponse = { jobId: string; queuePosition?: number | null; status: "queued" | "downloading" | "completed" | "failed" | "paused" | "cancelled"; progress: { percent: number; speed: string | null; eta: string | null; current: number | null; total: number | null; message: string }; logs: string[]; result?: DownloadResponse; error?: { message: string } };
@@ -221,7 +221,7 @@ export default function Home() {
     if (!metadata) return;
     const tracks = metadata.metadata.playlistEntries
       .filter((entry) => entry.sourceUrl && (!selectedItems || selectedItems.has(entry.index)))
-      .map((entry) => streamTrack(entry.sourceUrl as string, { title: entry.title, artist: metadata.metadata.uploader, cover: entry.thumbnailUrl, durationSeconds: entry.durationSeconds }));
+      .map((entry) => streamTrack(entry.sourceUrl as string, { title: entry.title, artist: entry.uploader ?? metadata.metadata.uploader, cover: entry.thumbnailUrl ?? metadata.metadata.thumbnailUrl, durationSeconds: entry.durationSeconds }));
     if (tracks.length) player.playTracks(tracks);
   }
 
@@ -291,6 +291,9 @@ export default function Home() {
   const playlistCount = metadata?.metadata.isPlaylist ? metadata.metadata.playlistCount : null;
   const playlistEntries = metadata?.metadata.isPlaylist ? metadata.metadata.playlistEntries : [];
   const isPlaylistReady = playlist && metadata?.metadata.isPlaylist === true;
+  const firstPlaylistUrls = playlistEntries.slice(0, 3).map((entry) => entry.sourceUrl).filter(Boolean).join("\n");
+  // Las primeras canciones de una playlist pegada se preparan para que «Escuchar playlist» suene al momento.
+  useEffect(() => { if (firstPlaylistUrls) firstPlaylistUrls.split("\n").forEach((url) => warmStream(url)); }, [firstPlaylistUrls]);
   const completedPlaylistItems = isPlaylistReady ? (download?.archive?.count ?? (isDownloadLoading ? Math.max(0, (downloadProgress?.current ?? 1) - 1) : (downloadProgress?.current ?? 0))) : 0;
   const canTrim = Boolean(metadata && !metadata.metadata.isPlaylist);
   const qualityLabel = format === "mp4" ? (videoQuality === "best" ? "Mejor disponible" : `Hasta ${videoQuality}p`) : format === "mp3" ? `${audioQuality} kbps` : format === "flac" ? "Sin pérdida" : "Original, sin conversión";

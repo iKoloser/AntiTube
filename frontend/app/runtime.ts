@@ -85,6 +85,18 @@ export async function stopSystemAudio(): Promise<void> {
   await tauriInternals()?.invoke("stop_system_audio").catch(() => undefined);
 }
 
+export type DiscordPresence = { title: string; artist: string | null; album: string | null; cover: string | null; sourceUrl: string | null; video: boolean; playing: boolean; start: number | null; end: number | null };
+
+/** Si esta versión de escritorio puede mostrar lo que suena en Discord. */
+export async function discordAvailable(): Promise<boolean> {
+  return Boolean(await tauriInternals()?.invoke("discord_available").catch(() => false));
+}
+
+/** Muestra (o borra, con null) en Discord lo que suena. Solo escritorio. */
+export async function setDiscordPresence(presence: DiscordPresence | null): Promise<void> {
+  await tauriInternals()?.invoke("discord_presence", { presence }).catch(() => undefined);
+}
+
 export async function quitApp(): Promise<void> {
   await tauriInternals()?.invoke("quit_app").catch(() => undefined);
 }

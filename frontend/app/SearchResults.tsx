@@ -49,7 +49,7 @@ export default function SearchResults({ query, selected, onOpen, onQuickDownload
   // para que al pulsar «Escuchar» suenen al instante, como en Spotify.
   useEffect(() => {
     if (!groups) return;
-    const first = groups.flatMap((group) => group.results.slice(0, 4)).slice(0, 8);
+    const first = groups.flatMap((group) => group.results.slice(0, 3)).slice(0, 6);
     first.forEach((result) => warmStream(result.url));
   }, [groups]);
 
@@ -104,7 +104,7 @@ export default function SearchResults({ query, selected, onOpen, onQuickDownload
       {group.error && <p className="search-error">{group.error}</p>}
       {!group.error && group.results.length === 0 && <p className="search-error">Sin resultados en {group.label}.</p>}
       <ul className="search-list">
-        {group.results.map((result) => <li key={`${group.provider}-${result.url}`} className={`search-item${playingUrl === result.url ? " is-playing" : ""}`}>
+        {group.results.map((result) => <li key={`${group.provider}-${result.url}`} className={`search-item${playingUrl === result.url ? " is-playing" : ""}`} onPointerEnter={() => warmStream(result.url, true)}>
           <button type="button" className="search-thumb" onClick={() => listenFrom(playable, playable.indexOf(result))} aria-label={`Escuchar ${result.title}`}>
             {result.thumbnailUrl ? <img src={result.thumbnailUrl} alt="" loading="lazy" /> : <span>♫</span>}
             <span className="search-thumb-play">{playingUrl === result.url && player.loading ? <span className="spinner" /> : <IconPlay size={22} />}</span>

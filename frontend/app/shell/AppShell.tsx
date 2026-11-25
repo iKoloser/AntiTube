@@ -13,6 +13,7 @@ import { toPlayerTrack } from "../player/types";
 import { api, apiUrl, isDesktop, listenTauri, setCloseToTray } from "../runtime";
 import { IconDownload, IconFolder, IconPlayer, IconQueue, IconTools, IconWave } from "./icons";
 import CommandPalette, { openCommandPalette } from "./CommandPalette";
+import DiscordBridge from "./DiscordPresence";
 import Immersive from "./Immersive";
 import LiveBackground from "./LiveBackground";
 import Telemetry from "./Telemetry";
@@ -200,6 +201,7 @@ function Shell({ children }: Readonly<{ children: React.ReactNode }>) {
     <PlayerDropHandler />
     <CommandPalette />
     <Immersive />
+    <DiscordBridge />
   </div>
   <div className="crt-overlay" aria-hidden="true" />
   </>;
