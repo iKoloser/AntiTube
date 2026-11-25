@@ -2,10 +2,16 @@
 
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import DesktopGate from "./desktop/DesktopGate";
+import { apiUrl, isDesktop } from "./runtime";
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export default function AuthGate({ children }: Readonly<{ children: React.ReactNode }>) {
+  if (isDesktop) return <DesktopGate>{children}</DesktopGate>;
+  return <WebAuthGate>{children}</WebAuthGate>;
+}
+
+function WebAuthGate({ children }: Readonly<{ children: React.ReactNode }>) {
   const pathname = usePathname();
   const router = useRouter();
   const [status, setStatus] = useState<"checking" | "authenticated" | "anonymous">("checking");
@@ -16,7 +22,7 @@ export default function AuthGate({ children }: Readonly<{ children: React.ReactN
       return;
     }
     let cancelled = false;
-    void fetch(`${apiUrl}/api/auth/session`, { credentials: "include" })
+    void fetch(`${apiUrl()}/api/auth/session`, { credentials: "include" })
       .then((response) => response.ok ? response.json() as Promise<{ authenticated?: boolean }> : { authenticated: false })
       .then((data) => {
         if (cancelled) return;

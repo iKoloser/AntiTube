@@ -1,22 +1,39 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express, { type Request, type Response } from "express";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
-import { createPlaylistArchive } from "./archive.js";
-import { DownloadLimitError, DownloadToolUnavailableError, downloadMedia, type AudioQuality, type DownloadFormat, type DownloadProgress, type VideoQuality } from "./downloader.js";
 import { ExtractorLookupError, ExtractorUnavailableError, getMediaMetadata } from "./extractor.js";
+import { createAppUpdateRouter } from "./appUpdate.js";
+import { createJobsRouter, rebalanceQueue } from "./jobs.js";
+import { createLibraryRouter } from "./library.js";
+import { createMediaRouter } from "./media.js";
+import { defaultDownloadDirectory, downloadDirectory, loadSettings, maxConcurrentDownloads, setDownloadDirectory, setMaxConcurrentDownloads } from "./settings.js";
+import { addToHistory, listHistory, removeFromHistory } from "./shazamHistory.js";
+import { autoUpdateTools, checkUpdates, detectTools, runSetup, runUpdate, setupStatus, type SetupStepId } from "./setup.js";
 
-dotenv.config({ path: "../.env" });
-dotenv.config();
+// En la versión de escritorio la configuración llega por variables de entorno
+// desde la app Tauri; no se leen archivos .env.
+const desktopMode = process.env.ANTITUBE_DESKTOP === "1";
+if (!desktopMode) {
+  dotenv.config({ path: "../.env" });
+  dotenv.config();
+} else if (!process.env.YTDLP_JS_RUNTIME) {
+  // yt-dlp necesita un runtime JavaScript para YouTube: reutilizamos el Node incluido en la app.
+  process.env.YTDLP_JS_RUNTIME = `node:${process.execPath}`;
+}
 
 const app = express();
 const execFileAsync = promisify(execFile);
 const port = Number(process.env.BACKEND_PORT ?? 4000);
 const corsOrigin = process.env.CORS_ORIGIN ?? "http://localhost:3000";
+// Orígenes del WebView de Tauri (Windows usa http(s)://tauri.localhost; macOS/Linux, tauri://localhost).
+const desktopOrigins = ["http://tauri.localhost", "https://tauri.localhost", "tauri://localhost", "http://localhost:3000"];
+const resourceDirectory = path.resolve(process.env.ANTITUBE_RESOURCE_DIR ?? process.cwd());
 const metadataTimeoutMs = Number(process.env.METADATA_TIMEOUT_MS ?? 60_000);
 const playlistMetadataTimeoutMs = Number(process.env.PLAYLIST_METADATA_TIMEOUT_MS ?? 180_000);
 const maxPlaylistItems = Number(process.env.MAX_PLAYLIST_ITEMS ?? 50);
@@ -27,20 +44,7 @@ const sessionCookieName = "antitube_session";
 const authRateLimitMax = Number(process.env.AUTH_RATE_LIMIT_MAX ?? 10);
 const authRateLimitWindowMs = Number(process.env.AUTH_RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000);
 const authAttempts = new Map<string, { count: number; resetAt: number }>();
-const downloadDirectory = path.resolve(process.cwd(), process.env.DOWNLOAD_DIR ?? "../downloads");
-let activeDownloads = 0;
-
-type DownloadJob = {
-  status: "queued" | "downloading" | "completed" | "failed";
-  progress: DownloadProgress;
-  logs: string[];
-  result?: { message: string; files: Array<{ filename: string; format: DownloadFormat; downloadUrl: string }>; archive?: { filename: string; downloadUrl: string; count: number }; format: DownloadFormat; isPlaylist: boolean; maxPlaylistItems: number };
-  error?: { error: string; message: string };
-};
-
-const downloadJobs = new Map<string, DownloadJob>();
-
-app.use(cors({ origin: corsOrigin, credentials: true }));
+app.use(cors({ origin: desktopMode ? desktopOrigins : corsOrigin, credentials: true }));
 app.use(express.json({ limit: "20mb" }));
 app.set("trust proxy", process.env.NODE_ENV === "production");
 
@@ -67,6 +71,11 @@ function setSessionCookie(response: Response, token: string, maxAgeSeconds: numb
 }
 
 app.use("/api", (request: Request, response: Response, next) => {
+  // La app de escritorio solo escucha en 127.0.0.1 y no necesita clave.
+  if (desktopMode) {
+    next();
+    return;
+  }
   const publicRoute = (request.method === "POST" && request.path === "/auth/login")
     || (request.method === "GET" && request.path === "/auth/session")
     || (request.method === "GET" && request.path === "/health");
@@ -171,7 +180,7 @@ app.post("/api/auth/login", (request: Request, response: Response) => {
 });
 
 app.get("/api/auth/session", (request: Request, response: Response) => {
-  response.json({ authenticated: hasValidSession(request) });
+  response.json({ authenticated: desktopMode || hasValidSession(request) });
 });
 
 app.post("/api/auth/logout", (_request: Request, response: Response) => {
@@ -180,7 +189,64 @@ app.post("/api/auth/logout", (_request: Request, response: Response) => {
 });
 
 app.get("/api/health", (_request: Request, response: Response) => {
-  response.json({ status: "ok", service: "antitube-backend" });
+  response.json({ status: "ok", service: "antitube-backend", desktop: desktopMode });
+});
+
+app.get("/api/setup/status", (_request: Request, response: Response) => {
+  response.json(setupStatus());
+});
+
+app.post("/api/setup/check", async (_request: Request, response: Response) => {
+  await detectTools();
+  response.json(setupStatus());
+});
+
+app.post("/api/setup/install", (request: Request, response: Response) => {
+  const started = runSetup({ includeShazam: request.body?.includeShazam === true });
+  response.status(started ? 202 : 409).json(setupStatus());
+});
+
+app.post("/api/setup/check-updates", async (_request: Request, response: Response) => {
+  await checkUpdates();
+  response.json(setupStatus());
+});
+
+app.post("/api/setup/update", (request: Request, response: Response) => {
+  const started = runUpdate(request.body?.id as SetupStepId);
+  response.status(started ? 202 : 409).json(setupStatus());
+});
+
+app.get("/api/desktop/info", (_request: Request, response: Response) => {
+  response.json({ desktop: desktopMode, downloadDirectory: downloadDirectory() });
+});
+
+/** Abre el explorador del sistema mostrando un archivo (o una carpeta). */
+function revealInExplorer(target: string, select: boolean): void {
+  if (process.platform === "win32") {
+    // explorer.exe necesita `/select,"ruta"` literal: el entrecomillado automático de Node
+    // envuelve el argumento entero y Explorer lo ignora cuando el nombre tiene espacios.
+    const explorerArgument = select ? `/select,"${target}"` : `"${target}"`;
+    spawn("explorer.exe", [explorerArgument], { windowsVerbatimArguments: true, detached: true, stdio: "ignore" }).on("error", (error) => console.error(`[open] ${error.message}`)).unref();
+    return;
+  }
+  if (process.platform === "darwin") execFile("open", select ? ["-R", target] : [target], () => undefined);
+  else execFile("xdg-open", [select ? path.dirname(target) : target], () => undefined);
+}
+
+// Abre la carpeta de descargas (y selecciona el archivo si se indica) en el explorador del sistema.
+app.post("/api/desktop/open", (request: Request, response: Response) => {
+  if (!desktopMode) {
+    response.status(404).json({ error: "No disponible", message: "Solo disponible en la versión de escritorio." });
+    return;
+  }
+  const rawFilename = request.body?.filename;
+  const filename = typeof rawFilename === "string" ? path.basename(rawFilename) : "";
+  const filePath = filename ? path.join(downloadDirectory(), filename) : null;
+  // Si el archivo ya no existe (o se renombró), abrimos al menos la carpeta.
+  const reveal = Boolean(filePath && existsSync(filePath));
+  const target = reveal && filePath ? filePath : downloadDirectory();
+  void mkdir(downloadDirectory(), { recursive: true }).then(() => revealInExplorer(target, reveal));
+  response.json({ opened: target });
 });
 
 function audioExtension(mimeType: unknown): string {
@@ -205,7 +271,7 @@ app.post("/api/shazam/recognize", async (request: Request, response: Response) =
     return;
   }
 
-  const temporaryDirectory = path.resolve(process.cwd(), "../downloads/.shazam-temp");
+  const temporaryDirectory = desktopMode ? path.join(process.env.ANTITUBE_DATA_DIR ?? downloadDirectory(), ".shazam-temp") : path.resolve(process.cwd(), "../downloads/.shazam-temp");
   const temporaryPath = path.join(temporaryDirectory, `${randomUUID()}${audioExtension(request.body?.mimeType)}`);
   let normalizedPath: string | null = null;
   const pythonBinary = process.env.PYTHON_BIN ?? "python";
@@ -226,7 +292,7 @@ app.post("/api/shazam/recognize", async (request: Request, response: Response) =
       "-c:a", "pcm_s16le",
       normalizedPath
     ], { timeout: ffmpegTimeoutMs, maxBuffer: 2 * 1024 * 1024 });
-    const scriptPath = path.resolve(process.cwd(), "shazam_recognize.py");
+    const scriptPath = path.join(resourceDirectory, "shazam_recognize.py");
     const { stdout } = await execFileAsync(pythonBinary, [scriptPath, normalizedPath], {
       timeout: shazamTimeoutMs,
       maxBuffer: 2 * 1024 * 1024
@@ -234,6 +300,7 @@ app.post("/api/shazam/recognize", async (request: Request, response: Response) =
     const jsonLine = stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).at(-1);
     const recognition = JSON.parse(jsonLine ?? "{}") as { error?: string; matched?: boolean };
     if (recognition.error) throw new Error(recognition.error);
+    if (recognition.matched) await addToHistory(recognition as Record<string, unknown>).catch(() => undefined);
     response.json({ message: recognition.matched ? "Canción reconocida correctamente." : "No se ha encontrado una coincidencia clara.", recognition });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "No se pudo ejecutar ShazamIO.";
@@ -242,7 +309,7 @@ app.post("/api/shazam/recognize", async (request: Request, response: Response) =
     if (errorCode === "ENOENT" && detail.includes(ffmpegBinary)) {
       response.status(503).json({ error: "FFmpeg no disponible", message: `No se ha encontrado FFmpeg (${detail}). Instálalo o configura FFMPEG_BIN.` });
     } else if (detail.includes("No module named") || (errorCode === "ENOENT" && detail.includes(pythonBinary))) {
-      response.status(503).json({ error: "ShazamIO no disponible", message: `Instala la dependencia con: python -m pip install -r backend/requirements.txt (${detail})` });
+      response.status(503).json({ error: "ShazamIO no disponible", message: desktopMode ? "SHAZAM no está instalado. Ve a Herramientas, marca «Instalar también SHAZAM» y pulsa «Instalar SHAZAM»." : `Instala la dependencia con: python -m pip install -r backend/requirements.txt (${detail})` });
     } else {
       response.status(422).json({ error: "No se pudo reconocer el audio", message: detail });
     }
@@ -283,6 +350,34 @@ app.post("/api/metadata", async (request: Request, response: Response) => {
   }
 });
 
+// Busca la canción reconocida en YouTube o SoundCloud y devuelve la vista previa del primer resultado.
+app.post("/api/shazam/preview", async (request: Request, response: Response) => {
+  const provider = request.body?.provider === "soundcloud" ? "soundcloud" : "youtube";
+  const query = typeof request.body?.query === "string" ? request.body.query.trim().slice(0, 200) : "";
+  if (!query) {
+    response.status(400).json({ error: "Búsqueda vacía", message: "Falta el título de la canción." });
+    return;
+  }
+  try {
+    const search = await getMediaMetadata(`${provider === "soundcloud" ? "scsearch1" : "ytsearch1"}:${query}`, metadataTimeoutMs, true, 1);
+    const first = search.playlistEntries[0];
+    if (!first?.sourceUrl) {
+      response.status(404).json({ error: "Sin resultados", message: `No se ha encontrado la canción en ${provider === "soundcloud" ? "SoundCloud" : "YouTube"}.` });
+      return;
+    }
+    const metadata = await getMediaMetadata(first.sourceUrl, metadataTimeoutMs, false, 1);
+    const analysis = analyzeUrl(metadata.sourceUrl) ?? analyzeUrl(first.sourceUrl);
+    response.json({ provider, metadata, analysis });
+  } catch (error) {
+    if (error instanceof ExtractorUnavailableError) {
+      response.status(503).json({ error: "Extractor no disponible", message: error.message });
+      return;
+    }
+    const message = error instanceof ExtractorLookupError ? error.message : "No se pudo buscar la canción.";
+    response.status(422).json({ error: "Búsqueda fallida", message });
+  }
+});
+
 app.post("/api/analyze", (request: Request, response: Response) => {
   const analysis = analyzeUrl(request.body?.url);
 
@@ -300,135 +395,75 @@ app.post("/api/analyze", (request: Request, response: Response) => {
   });
 });
 
-app.post("/api/download", (request: Request, response: Response) => {
-  const analysis = analyzeDownloadSource(request.body?.url);
-  const format = request.body?.format;
-  const quality = request.body?.quality;
-  const playlist = request.body?.playlist === true;
-  const playlistTitle = typeof request.body?.playlistTitle === "string" ? request.body.playlistTitle : null;
-  const requestedPlaylistTotal = Number(request.body?.playlistTotal);
-  const playlistTotal = playlist && Number.isInteger(requestedPlaylistTotal) && requestedPlaylistTotal > 0
-    ? Math.min(requestedPlaylistTotal, maxPlaylistItems)
-    : null;
-  const validVideoQualities = ["best", "360", "480", "720", "1080"] as const;
-  const validAudioQualities = ["128", "192", "256", "320"] as const;
-  const validQuality = format === "mp4"
-    ? validVideoQualities.includes(quality)
-    : format === "mp3" && validAudioQualities.includes(quality);
+app.use(createJobsRouter({ analyzeDownloadSource, maxPlaylistItems }));
+app.use(createMediaRouter({ metadataTimeoutMs, analyzeUrl }));
+app.use(createLibraryRouter({ reveal: (filePath) => revealInExplorer(filePath, true) }));
+app.use(createAppUpdateRouter());
 
-  if (!analysis || (format !== "mp4" && format !== "mp3") || !validQuality) {
-    response.status(400).json({
-      error: "Solicitud inválida",
-      message: "Envía una URL http(s), un formato mp4/mp3 y una calidad compatible."
-    });
-    return;
-  }
-
-  if (analysis.videoOnly && format !== "mp4") {
-    response.status(400).json({
-      error: "Formato no compatible",
-      message: `${analysis.platform} solo permite descargas de vídeo en formato MP4.`
-    });
-    return;
-  }
-
-  if (activeDownloads >= 1) {
-    response.status(429).json({ error: "Descarga ocupada", message: "Solo se permite una descarga simultánea." });
-    return;
-  }
-
-  const jobId = randomUUID();
-  const initialMessage = playlist
-    ? playlistTotal ? `Preparando playlist de ${playlistTotal} elementos…` : "Preparando playlist…"
-    : "Preparando descarga…";
-  const job: DownloadJob = { status: "queued", progress: { percent: 0, speed: null, eta: null, current: null, total: playlistTotal, message: initialMessage }, logs: [initialMessage] };
-  downloadJobs.set(jobId, job);
-  activeDownloads += 1;
-  void (async () => {
-    job.status = "downloading";
-    try {
-      const result = await downloadMedia(
-        analysis.url,
-        format as DownloadFormat,
-        quality as VideoQuality | AudioQuality,
-        playlist,
-        playlistTotal,
-        (progress) => { job.progress = progress; },
-        (line) => {
-          job.logs.push(line);
-          if (job.logs.length > 100) job.logs.shift();
-        }
-      );
-      job.progress = {
-        percent: result.isPlaylist ? 99 : 100,
-        speed: null,
-        eta: null,
-        current: null,
-        total: null,
-        message: result.isPlaylist ? "Preparando archivo ZIP…" : "Finalizando descarga…"
-      };
-      const archiveFilename = playlist
-        ? await createPlaylistArchive(downloadDirectory, result.files.map((file) => file.filename), playlistTitle)
-        : null;
-      if (archiveFilename) job.logs.push(`ZIP preparado: ${archiveFilename}`);
-      job.result = {
-        message: archiveFilename
-          ? `Playlist ${result.format.toUpperCase()} preparada: ${result.files.length} canciones.`
-          : `Descarga ${result.format.toUpperCase()} completada: ${result.files.length} archivo(s).`,
-        files: archiveFilename ? [] : result.files.map((file) => ({ ...file, downloadUrl: `/api/downloads/${encodeURIComponent(file.filename)}` })),
-        ...(archiveFilename ? { archive: { filename: archiveFilename, downloadUrl: `/api/downloads/${encodeURIComponent(archiveFilename)}`, count: result.files.length } } : {}),
-        format: result.format,
-        isPlaylist: result.isPlaylist,
-        maxPlaylistItems
-      };
-      job.status = "completed";
-      job.progress = {
-        percent: 100,
-        speed: null,
-        eta: null,
-        current: result.isPlaylist ? result.files.length : null,
-        total: result.isPlaylist ? result.files.length : null,
-        message: "Descarga completada"
-      };
-    } catch (error) {
-      job.status = "failed";
-      if (error instanceof DownloadToolUnavailableError) job.error = { error: "Herramienta no disponible", message: error.message };
-      else if (error instanceof DownloadLimitError) job.error = { error: "Archivo demasiado grande", message: error.message };
-      else {
-        const message = error instanceof Error ? error.message : "Error inesperado durante la descarga.";
-        job.error = { error: "Descarga fallida", message };
-        job.logs.push(`ERROR: ${message}`);
-      }
-    } finally {
-      activeDownloads -= 1;
-    }
-  })();
-  response.status(202).json({ jobId, status: job.status, progress: job.progress, logs: job.logs });
+app.get("/api/settings", (_request: Request, response: Response) => {
+  response.json({ downloadDirectory: downloadDirectory(), defaultDownloadDirectory: defaultDownloadDirectory(), maxConcurrent: maxConcurrentDownloads() });
 });
 
-app.get("/api/download/:jobId", (request: Request, response: Response) => {
-  const jobId = typeof request.params.jobId === "string" ? request.params.jobId : "";
-  const job = downloadJobs.get(jobId);
-  if (!job) {
-    response.status(404).json({ error: "Tarea no encontrada", message: "La tarea de descarga ya no existe." });
-    return;
+app.post("/api/settings/concurrency", async (request: Request, response: Response) => {
+  const value = await setMaxConcurrentDownloads(Number(request.body?.maxConcurrent));
+  rebalanceQueue();
+  response.json({ maxConcurrent: value });
+});
+
+app.post("/api/settings", async (request: Request, response: Response) => {
+  const value = request.body?.downloadDirectory;
+  try {
+    const directory = await setDownloadDirectory(typeof value === "string" && value.trim() ? value : null);
+    response.json({ downloadDirectory: directory, defaultDownloadDirectory: defaultDownloadDirectory(), maxConcurrent: maxConcurrentDownloads() });
+  } catch (error) {
+    response.status(400).json({ error: "Carpeta no válida", message: error instanceof Error ? error.message : "No se pudo usar esa carpeta." });
   }
-  response.json({ ...job, jobId });
+});
+
+app.get("/api/shazam/history", async (_request: Request, response: Response) => {
+  response.json({ entries: await listHistory() });
+});
+
+app.delete("/api/shazam/history/:id", async (request: Request, response: Response) => {
+  await removeFromHistory(String(request.params.id));
+  response.json({ entries: await listHistory() });
+});
+
+app.delete("/api/shazam/history", async (_request: Request, response: Response) => {
+  await removeFromHistory(null);
+  response.json({ entries: [] });
 });
 
 app.get("/api/downloads/:filename", (request: Request, response: Response) => {
   const rawFilename = request.params.filename;
   const filename = typeof rawFilename === "string" ? path.basename(rawFilename) : "";
-  if (!filename || filename !== rawFilename || !/\.(mp3|mp4|zip)$/i.test(filename)) {
+  if (!filename || filename !== rawFilename || !/\.(mp3|mp4|m4a|opus|flac|zip)$/i.test(filename)) {
     response.status(400).json({ error: "Archivo inválido", message: "El archivo solicitado no es válido." });
     return;
   }
 
-  response.download(path.join(downloadDirectory, filename), filename, (error) => {
+  response.download(path.join(downloadDirectory(), filename), filename, (error) => {
     if (error && !response.headersSent) response.status(404).json({ error: "Archivo no encontrado", message: "El archivo ya no está disponible." });
   });
 });
 
-app.listen(port, () => {
-  console.log(`AntiTube backend disponible en http://localhost:${port}`);
-});
+if (desktopMode) {
+  // La app Tauri mantiene abierta la entrada estándar; si se cierra, la app ha terminado.
+  process.stdin.on("end", () => process.exit(0));
+  process.stdin.on("error", () => process.exit(0));
+  process.stdin.resume();
+  void detectTools().then(() => autoUpdateTools());
+  void loadSettings().finally(() => {
+    // Restos de descargas interrumpidas al cerrar la app.
+    void rm(path.join(downloadDirectory(), ".antitube-temp"), { recursive: true, force: true }).catch(() => undefined);
+    app.listen(port, "127.0.0.1", () => {
+      console.log(`ANTITUBE_READY http://127.0.0.1:${port}`);
+    });
+  });
+} else {
+  void loadSettings().finally(() => {
+    app.listen(port, () => {
+      console.log(`AntiTube backend disponible en http://localhost:${port}`);
+    });
+  });
+}

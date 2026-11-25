@@ -12,8 +12,8 @@ export default function AntiTubeLogo() {
     >
       <defs>
         <linearGradient id="atCyberCyan" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#00e5ff" />
-          <stop offset="55%" stopColor="#39a7ff" />
+          <stop offset="0%" stopColor="var(--accent-2)" />
+          <stop offset="55%" stopColor="var(--accent)" />
           <stop offset="100%" stopColor="#1d6ff2" />
         </linearGradient>
         <linearGradient id="atMetalWhite" x1="0%" y1="0%" x2="0%" y2="100%">
@@ -32,7 +32,7 @@ export default function AntiTubeLogo() {
         <circle
           className="logo-orbit-outer"
           r="26"
-          stroke="#39a7ff"
+          stroke="var(--accent)"
           strokeOpacity="0.38"
           strokeWidth="1"
           strokeDasharray="10 6 2 6"
@@ -41,7 +41,7 @@ export default function AntiTubeLogo() {
         <circle
           className="logo-orbit-inner"
           r="21"
-          stroke="#00e5ff"
+          stroke="var(--accent-2)"
           strokeOpacity="0.24"
           strokeWidth="0.9"
           strokeDasharray="4 8"
@@ -59,13 +59,13 @@ export default function AntiTubeLogo() {
         {/* Corner HUD brackets */}
         <path
           d="M -23 -17 L -23 -23 L -17 -23"
-          stroke="#39a7ff"
+          stroke="var(--accent)"
           strokeOpacity="0.6"
           strokeWidth="1.1"
         />
         <path
           d="M 23 17 L 23 23 L 17 23"
-          stroke="#39a7ff"
+          stroke="var(--accent)"
           strokeOpacity="0.6"
           strokeWidth="1.1"
         />
@@ -73,7 +73,7 @@ export default function AntiTubeLogo() {
         {/* Futuristic Play Prism */}
         <path
           d="M -7 -10.5 L 11.5 0 L -7 10.5 Z"
-          fill="#39a7ff"
+          fill="var(--accent)"
           fillOpacity="0.16"
           stroke="url(#atMetalWhite)"
           strokeWidth="1.65"
@@ -103,14 +103,14 @@ export default function AntiTubeLogo() {
         />
 
         {/* Vertex telemetry nodes */}
-        <circle cx="0" cy="-22" r="1.8" fill="#00e5ff" />
-        <circle cx="19.05" cy="11" r="1.5" fill="#39a7ff" />
-        <circle cx="-19.05" cy="11" r="1.5" fill="#39a7ff" />
+        <circle cx="0" cy="-22" r="1.8" fill="var(--accent-2)" />
+        <circle cx="19.05" cy="11" r="1.5" fill="var(--accent)" />
+        <circle cx="-19.05" cy="11" r="1.5" fill="var(--accent)" />
       </g>
 
       {/* Top HUD Micro-telemetry label */}
       <g transform="translate(72, 16)">
-        <circle className="logo-status-dot" cx="3" cy="-3" r="2" fill="#00e5ff" />
+        <circle className="logo-status-dot" cx="3" cy="-3" r="2" fill="var(--accent-2)" />
         <text
           x="10"
           y="0"
@@ -145,8 +145,8 @@ export default function AntiTubeLogo() {
       <g transform="translate(72, 52)">
         <line x1="0" y1="0" x2="172" y2="0" stroke="#162231" strokeWidth="1" />
         <line x1="0" y1="0" x2="50" y2="0" stroke="url(#atCyberCyan)" strokeWidth="1.8" />
-        <rect x="54" y="-1" width="6" height="2" fill="#39a7ff" fillOpacity="0.75" />
-        <rect x="63" y="-1" width="3" height="2" fill="#00e5ff" fillOpacity="0.45" />
+        <rect x="54" y="-1" width="6" height="2" fill="var(--accent)" fillOpacity="0.75" />
+        <rect x="63" y="-1" width="3" height="2" fill="var(--accent-2)" fillOpacity="0.45" />
       </g>
     </svg>
   );

@@ -2,8 +2,8 @@
 
 import { FormEvent, useState } from "react";
 import AntiTubeLogo from "../AntiTubeLogo";
+import { apiUrl } from "../runtime";
 
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
 export default function AccessPage() {
   const [key, setKey] = useState("");
@@ -15,7 +15,7 @@ export default function AccessPage() {
     setError(null);
     setIsLoading(true);
     try {
-      const response = await fetch(`${apiUrl}/api/auth/login`, {
+      const response = await fetch(`${apiUrl()}/api/auth/login`, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
