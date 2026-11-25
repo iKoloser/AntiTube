@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import { promisify } from "node:util";
@@ -185,7 +185,8 @@ export async function searchMedia(provider: SearchProvider, query: string, limit
   return searchProviders[provider].search(query, limit, timeoutMs);
 }
 
-type PreviewSource = { url: string; headers: Record<string, string>; expires: number };
+/** `fallback`: URL original para reintentar por tubería (yt-dlp + FFmpeg) si la directa falla. */
+type PreviewSource = { url: string; headers: Record<string, string>; expires: number; fallback?: string };
 const previews = new Map<string, PreviewSource>();
 
 function prunePreviews(): void {
@@ -250,18 +251,34 @@ const listenCache = new Map<string, { token: string; expires: number }>();
 const listenPending = new Map<string, Promise<string>>();
 const listenLifetimeMs = 2 * 60 * 60 * 1000;
 
-async function listenToken(url: string, timeoutMs: number): Promise<string> {
+// Las preparaciones por adelantado van de dos en dos para no saturar el equipo;
+// lo que el usuario pulsa no espera a esta fila.
+let warmRunning = 0;
+const warmWaiting: Array<() => void> = [];
+async function warmSlot<T>(task: () => Promise<T>): Promise<T> {
+  if (warmRunning >= 2) await new Promise<void>((resolve) => warmWaiting.push(resolve));
+  warmRunning += 1;
+  try { return await task(); } finally { warmRunning -= 1; warmWaiting.shift()?.(); }
+}
+
+const pipeUrl = (url: string) => `/api/listen/pipe?url=${encodeURIComponent(url)}`;
+
+function forgetListen(url: string): void {
+  listenCache.delete(url);
+}
+
+async function listenToken(url: string, timeoutMs: number, warm = false): Promise<string> {
   const cached = listenCache.get(url);
   if (cached && cached.expires > Date.now() && previews.has(cached.token)) return cached.token;
   const pending = listenPending.get(url);
   if (pending) return pending;
   const job = (async () => {
-    const resolved = await resolvePreview(url, "audio", timeoutMs);
+    const resolved = warm ? await warmSlot(() => resolvePreview(url, "audio", timeoutMs)) : await resolvePreview(url, "audio", timeoutMs);
     if (!resolved) throw new Error("Sin audio directo");
     prunePreviews();
     const token = randomUUID();
     const expires = Date.now() + listenLifetimeMs;
-    previews.set(token, { ...resolved.source, expires: expires + 60 * 60 * 1000 });
+    previews.set(token, { ...resolved.source, expires: expires + 60 * 60 * 1000, fallback: url });
     listenCache.set(url, { token, expires });
     if (listenCache.size > 500) listenCache.delete(listenCache.keys().next().value as string);
     return token;
@@ -343,16 +360,63 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
       response.status(400).json({ error: "URL inválida", message: "Falta la URL que quieres escuchar." });
       return;
     }
+    const warm = request.query.warm === "1";
     try {
-      const token = await listenToken(analysis.url, deps.metadataTimeoutMs);
-      if (request.query.warm === "1") { response.status(204).end(); return; }
+      const token = await listenToken(analysis.url, deps.metadataTimeoutMs, warm);
+      if (warm) { response.status(204).end(); return; }
       response.setHeader("Cache-Control", "no-store");
       response.redirect(302, `/api/preview/stream/${token}`);
     } catch (error) {
-      console.error(`[listen] ${error instanceof Error ? error.message : String(error)}`);
       const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : null;
-      response.status(code === "ENOENT" ? 503 : 422).json({ error: "No se puede escuchar", message: code === "ENOENT" ? "yt-dlp no está instalado en este entorno." : "No se pudo preparar el audio de este contenido." });
+      console.error(`[listen] sin audio directo, uso la tubería: ${(error instanceof Error ? error.message : String(error)).split("\n").slice(-2).join(" ")}`);
+      if (code === "ENOENT") {
+        response.status(503).json({ error: "No se puede escuchar", message: "yt-dlp no está instalado en este entorno." });
+        return;
+      }
+      // Sin URL directa (solo HLS, restricciones, etc.): yt-dlp la saca igualmente por tubería.
+      if (warm) { response.status(204).end(); return; }
+      response.redirect(302, pipeUrl(analysis.url));
     }
+  });
+
+  // Plan B: yt-dlp descarga el audio a su manera y FFmpeg lo entrega como MP3
+  // mientras llega. No permite saltar adelante, pero suena casi todo.
+  router.get("/api/listen/pipe", (request: Request, response: Response) => {
+    const analysis = deps.analyzeUrl(request.query.url);
+    if (!analysis) {
+      response.status(400).json({ error: "URL inválida", message: "Falta la URL que quieres escuchar." });
+      return;
+    }
+    const ytdlp = spawn(process.env.YTDLP_BIN ?? "yt-dlp", [
+      "--no-playlist", "--quiet", "--no-warnings", "--no-part",
+      "--js-runtimes", process.env.YTDLP_JS_RUNTIME?.trim() || "node",
+      "-f", "bestaudio/best", "-o", "-", "--", analysis.url
+    ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+    const ffmpeg = spawn(process.env.FFMPEG_BIN ?? "ffmpeg", [
+      "-nostdin", "-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "-f", "mp3", "pipe:1"
+    ], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
+    let errors = "";
+    ytdlp.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-2000); });
+    ytdlp.stdout.pipe(ffmpeg.stdin).on("error", () => undefined);
+    const stop = () => { ytdlp.kill(); ffmpeg.kill(); };
+    request.on("close", stop);
+    ytdlp.on("error", stop);
+    ffmpeg.on("error", () => { stop(); if (!response.headersSent) response.status(503).json({ error: "FFmpeg no disponible", message: "Hace falta FFmpeg para escuchar este contenido." }); });
+    ytdlp.on("close", (code) => { if (code) console.error(`[listen] la tubería también falló: ${errors.trim().split("\n").slice(-1)[0] ?? code}`); });
+    let started = false;
+    ffmpeg.stdout.on("data", (chunk: Buffer) => {
+      if (!started) {
+        started = true;
+        response.status(200);
+        response.setHeader("Content-Type", "audio/mpeg");
+        response.setHeader("Cache-Control", "no-store");
+      }
+      response.write(chunk);
+    });
+    ffmpeg.on("close", () => {
+      if (!started && !response.headersSent) response.status(422).json({ error: "No se puede escuchar", message: errors.trim().split("\n").slice(-1)[0] || "No se pudo sacar el audio." });
+      else response.end();
+    });
   });
 
   // Reenvía el contenido con soporte de rangos para poder saltar a cualquier segundo.
@@ -368,6 +432,16 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
       const headers: Record<string, string> = { ...source.headers };
       if (request.headers.range) headers.Range = request.headers.range;
       const upstream = await fetch(source.url, { headers, signal: controller.signal, redirect: "follow" });
+      if (upstream.status >= 400 && upstream.status !== 416 && source.fallback) {
+        // La plataforma rechaza la URL directa (403, caducada…): la próxima vez se
+        // vuelve a resolver y ahora se escucha por tubería.
+        console.error(`[listen] la URL directa respondió ${upstream.status}, uso la tubería`);
+        void upstream.body?.cancel().catch(() => undefined);
+        forgetListen(source.fallback);
+        previews.delete(String(request.params.token));
+        response.redirect(302, pipeUrl(source.fallback));
+        return;
+      }
       response.status(upstream.status);
       for (const name of ["content-type", "content-length", "content-range", "accept-ranges"]) {
         const value = upstream.headers.get(name);
@@ -379,7 +453,13 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
         return;
       }
       Readable.fromWeb(upstream.body as never).on("error", () => response.end()).pipe(response);
-    } catch {
+    } catch (error) {
+      console.error(`[preview] ${error instanceof Error ? error.message : String(error)}`);
+      if (!response.headersSent && source.fallback && !controller.signal.aborted) {
+        forgetListen(source.fallback);
+        response.redirect(302, pipeUrl(source.fallback));
+        return;
+      }
       if (!response.headersSent) response.status(502).json({ error: "Vista previa no disponible", message: "La plataforma no ha respondido." });
       else response.end();
     }

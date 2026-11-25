@@ -241,13 +241,16 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
   }, [currentSrc, current?.durationSeconds, ensureGraph]);
 
   // Prepara en el motor la siguiente canción en streaming para que no haya silencio entre canciones.
-  const upcoming = queue[index + 1];
-  const upcomingStream = upcoming?.id.startsWith("listen:") ? upcoming.src : null;
+  // Se preparan las dos siguientes (y la anterior) para poder saltar sin esperas.
+  const nearbyStreams = [queue[index + 1], queue[index + 2], queue[index - 1]]
+    .filter((track): track is PlayerTrack => Boolean(track?.sourceUrl && track.id.startsWith("listen:")))
+    .map((track) => track.sourceUrl as string)
+    .join("\n");
   useEffect(() => {
-    if (!upcomingStream || !current) return;
-    const timer = window.setTimeout(() => { void fetch(`${absolute(upcomingStream)}&warm=1`, { credentials: "include" }).catch(() => undefined); }, 4000);
+    if (!nearbyStreams) return;
+    const timer = window.setTimeout(() => nearbyStreams.split("\n").forEach(warmStream), 300);
     return () => window.clearTimeout(timer);
-  }, [upcomingStream, current]);
+  }, [nearbyStreams]);
 
   const next = useCallback((auto = false) => {
     const { queue: list, index: position, settings: options } = stateRef.current;
@@ -290,7 +293,7 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
       if (failed?.id.startsWith("listen:")) {
         // En streaming, una canción que no se puede sacar no corta la cola.
         setError(`No se pudo escuchar «${failed.title}» en streaming.`);
-        if (position + 1 < list.length) { window.setTimeout(() => next(true), 1200); return; }
+        if (position + 1 < list.length) { window.setTimeout(() => next(true), 400); return; }
       } else {
         setError("No se puede reproducir este archivo. Puede que se haya movido o que esté dañado.");
       }
@@ -622,6 +625,16 @@ export function streamTrack(url: string, meta: { title: string; artist: string |
     needsTranscode: false,
     sourceUrl: url
   };
+}
+
+const warmed = new Map<string, number>();
+
+/** Pide al motor que deje listo el audio de una canción en streaming (sin reproducirla). */
+export function warmStream(url: string) {
+  const last = warmed.get(url);
+  if (last && Date.now() - last < 60 * 60 * 1000) return;
+  warmed.set(url, Date.now());
+  void fetch(`${apiUrl()}/api/listen?url=${encodeURIComponent(url)}&warm=1`, { credentials: "include" }).catch(() => warmed.delete(url));
 }
 
 export { apiUrl };

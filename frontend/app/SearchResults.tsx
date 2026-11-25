@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { previewTrack, streamTrack, usePlayer } from "./player/PlayerContext";
+import { previewTrack, streamTrack, usePlayer, warmStream } from "./player/PlayerContext";
 import { formatTime } from "./player/types";
 import { api } from "./runtime";
 import { IconDownload, IconHeadphones, IconLink, IconPlay, IconPlus } from "./shell/icons";
@@ -44,6 +44,14 @@ export default function SearchResults({ query, selected, onOpen, onQuickDownload
       .catch((caught) => { if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "No se pudo buscar."); });
     return () => controller.abort();
   }, [query, selected]);
+
+  // En cuanto llegan los resultados, el motor prepara el audio de los primeros
+  // para que al pulsar «Escuchar» suenen al instante, como en Spotify.
+  useEffect(() => {
+    if (!groups) return;
+    const first = groups.flatMap((group) => group.results.slice(0, 4)).slice(0, 8);
+    first.forEach((result) => warmStream(result.url));
+  }, [groups]);
 
   const toStream = (result: Result) => streamTrack(result.url, { title: result.title, artist: result.uploader, cover: result.thumbnailUrl, durationSeconds: result.durationSeconds });
 
