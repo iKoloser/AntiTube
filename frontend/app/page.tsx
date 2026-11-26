@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePersistentState, useScrollMemory } from "./persist";
 import AdvancedOptions, { useDownloadPrefs } from "./DownloadPrefs";
 import BatchPanel from "./BatchPanel";
 import FormatPicker, { type AudioAvailability, type DownloadFormat } from "./FormatPicker";
@@ -92,42 +93,43 @@ function useTypewriter(lines: string[], active: boolean): string {
 }
 
 export default function Home() {
-  const [input, setInput] = useState("");
-  const [url, setUrl] = useState("");
-  const [searchQuery, setSearchQuery] = useState<string | null>(null);
-  const [searchProviders, setSearchProviders] = useState<SearchProvider[]>(["youtube", "ytmusic", "bandcamp", "audius"]);
-  const [result, setResult] = useState<AnalysisResponse | null>(null);
-  const [metadata, setMetadata] = useState<MetadataResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [format, setFormat] = useState<DownloadFormat>("mp4");
-  const [videoQuality, setVideoQuality] = useState<VideoQuality>("720");
-  const [audioQuality, setAudioQuality] = useState<AudioQuality>("320");
+  const [input, setInput] = usePersistentState("descargar:input", "");
+  const [url, setUrl] = usePersistentState("descargar:url", "");
+  const [searchQuery, setSearchQuery] = usePersistentState<string | null>("descargar:searchQuery", null);
+  const [searchProviders, setSearchProviders] = usePersistentState<SearchProvider[]>("descargar:providers", ["youtube", "ytmusic", "bandcamp", "audius"]);
+  const [result, setResult] = usePersistentState<AnalysisResponse | null>("descargar:result", null);
+  const [metadata, setMetadata] = usePersistentState<MetadataResponse | null>("descargar:metadata", null);
+  const [error, setError] = usePersistentState<string | null>("descargar:error", null);
+  const [format, setFormat] = usePersistentState<DownloadFormat>("descargar:format", "mp4");
+  const [videoQuality, setVideoQuality] = usePersistentState<VideoQuality>("descargar:videoQuality", "720");
+  const [audioQuality, setAudioQuality] = usePersistentState<AudioQuality>("descargar:audioQuality", "320");
   const [quick, setQuick] = useState<{ format: DownloadFormat; quality: string }>({ format: "mp3", quality: "320" });
-  const [playlist, setPlaylist] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isMetadataLoading, setIsMetadataLoading] = useState(false);
+  const [playlist, setPlaylist] = usePersistentState("descargar:playlist", false);
+  const [isLoading, setIsLoading] = usePersistentState("descargar:isLoading", false);
+  const [isMetadataLoading, setIsMetadataLoading] = usePersistentState("descargar:isMetadataLoading", false);
   const [isDownloadLoading, setIsDownloadLoading] = useState(false);
   const [download, setDownload] = useState<DownloadResponse | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<DownloadJobResponse["progress"] | null>(null);
   const [downloadLogs, setDownloadLogs] = useState<string[]>([]);
-  const [trimOpen, setTrimOpen] = useState(false);
-  const [section, setSection] = useState<Section | null>(null);
-  const [mediaDuration, setMediaDuration] = useState<number | null>(null);
+  const [trimOpen, setTrimOpen] = usePersistentState("descargar:trimOpen", false);
+  const [section, setSection] = usePersistentState<Section | null>("descargar:section", null);
+  const [mediaDuration, setMediaDuration] = usePersistentState<number | null>("descargar:mediaDuration", null);
   const trackingRef = useRef(0);
   const cardRef = useRef<HTMLElement | null>(null);
   const { prefs, update: updatePrefs, requestFields } = useDownloadPrefs();
-  const [selectedItems, setSelectedItems] = useState<Set<number> | null>(null);
-  const [batchMode, setBatchMode] = useState(false);
+  const [selectedItems, setSelectedItems] = usePersistentState<Set<number> | null>("descargar:selectedItems", null);
+  const [batchMode, setBatchMode] = usePersistentState("descargar:batchMode", false);
   const player = usePlayer();
   const toast = useToast();
   const isUrl = looksLikeUrl(input);
+  useScrollMemory("descargar");
 
   useEffect(() => {
     try {
       const savedQuick = JSON.parse(localStorage.getItem(quickKey) ?? "null") as typeof quick | null;
       if (savedQuick) setQuick(savedQuick);
       const savedProviders = JSON.parse(localStorage.getItem(providersKey) ?? "null") as SearchProvider[] | null;
-      if (savedProviders?.length) setSearchProviders(savedProviders);
+      if (savedProviders?.length) setSearchProviders((current) => current.join() === savedProviders.join() ? current : savedProviders);
     } catch { /* sin preferencias */ }
   }, []);
 

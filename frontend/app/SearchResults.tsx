@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePersistentState } from "./persist";
 import { previewTrack, streamTrack, usePlayer, warmStream } from "./player/PlayerContext";
 import { formatTime } from "./player/types";
 import { api } from "./runtime";
@@ -22,28 +23,38 @@ export const providers: Array<{ id: SearchProvider; label: string; mark: string 
 /** Plataformas donde tiene sentido ver la imagen además de escuchar. */
 const videoProviders = new Set<SearchProvider>(["youtube"]);
 
+// Resultados ya buscados en esta sesión de la app (clave: búsqueda + plataformas).
+const searchCache = new Map<string, Group[]>();
+
 /**
  * Resultados de búsqueda de varias plataformas a la vez. Cada resultado se
  * puede escuchar al momento, abrir con todas las opciones o mandar directo a la cola.
  */
 export default function SearchResults({ query, selected, onOpen, onQuickDownload }: Readonly<{ query: string; selected: SearchProvider[]; onOpen: (url: string) => void; onQuickDownload: (result: Result) => Promise<void> }>) {
-  const [groups, setGroups] = useState<Group[] | null>(null);
+  const searchKey = `${query}\u0000${selected.join(",")}`;
+  const [groups, setGroups] = useState<Group[] | null>(() => searchCache.get(searchKey) ?? null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<SearchProvider | "all">("all");
+  const [tab, setTab] = usePersistentState<SearchProvider | "all">(`search-tab:${searchKey}`, "all");
   const [busy, setBusy] = useState<string | null>(null);
   const player = usePlayer();
   const toast = useToast();
 
   useEffect(() => {
+    // Al volver a la pestaña, los resultados de la misma búsqueda siguen ahí.
+    const cached = searchCache.get(searchKey);
+    if (cached) { setGroups(cached); setError(null); return; }
     const controller = new AbortController();
     setGroups(null);
     setError(null);
-    setTab("all");
     api<{ groups: Group[] }>("/api/search", { body: { query, providers: selected, limit: 12 }, signal: controller.signal })
-      .then((data) => setGroups(data.groups))
+      .then((data) => {
+        searchCache.set(searchKey, data.groups);
+        if (searchCache.size > 30) searchCache.delete(searchCache.keys().next().value as string);
+        setGroups(data.groups);
+      })
       .catch((caught) => { if (!controller.signal.aborted) setError(caught instanceof Error ? caught.message : "No se pudo buscar."); });
     return () => controller.abort();
-  }, [query, selected]);
+  }, [searchKey]);
 
   // En cuanto llegan los resultados, el motor prepara el audio de los primeros
   // para que al pulsar «Escuchar» suenen al instante, como en Spotify.
