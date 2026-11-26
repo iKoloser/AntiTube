@@ -5,7 +5,7 @@ import https from "node:https";
 import { promisify } from "node:util";
 import { Router, type Request, type Response } from "express";
 import { ensureAudio, forgetAudio, serveAudio, type AudioSource } from "./audiocache.js";
-import { demoteYouTubeClient, soundcloudDirect, youtubeDirect } from "./direct.js";
+import { demoteYouTubeClient, soundcloudDirect, soundcloudSearch, youtubeDirect, youtubeMusicSearch, youtubeSearch, type NativeSearchResult } from "./direct.js";
 import { ExtractorLookupError, ExtractorUnavailableError, getMediaMetadata } from "./extractor.js";
 
 /**
@@ -176,12 +176,29 @@ const audiusSearch: ProviderSearch = async (query, limit, timeoutMs) => {
     }));
 };
 
+/** Búsqueda propia (rápida); si falla o no da nada, la de yt-dlp. */
+function nativeFirst(provider: SearchProvider, native: (query: string, limit: number) => Promise<NativeSearchResult[]>, fallback: ProviderSearch): ProviderSearch {
+  return async (query, limit, timeoutMs) => {
+    const started = Date.now();
+    try {
+      const found = await native(query, limit);
+      if (found.length > 0) {
+        console.log(`[search] ${provider} en ${Date.now() - started} ms`);
+        return found.map((item) => ({ provider, ...item }));
+      }
+    } catch (error) {
+      console.error(`[search] ${provider} propio falló: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return fallback(query, limit, timeoutMs);
+  };
+}
+
 export const searchProviders: Record<SearchProvider, { label: string; search: ProviderSearch }> = {
-  youtube: { label: "YouTube", search: ytdlpSearch("youtube", (query, limit) => `ytsearch${limit}:${query}`) },
-  ytmusic: { label: "YouTube Music", search: ytdlpSearch("ytmusic", (query) => `https://music.youtube.com/search?q=${encodeURIComponent(query)}#songs`) },
+  youtube: { label: "YouTube", search: nativeFirst("youtube", youtubeSearch, ytdlpSearch("youtube", (query, limit) => `ytsearch${limit}:${query}`)) },
+  ytmusic: { label: "YouTube Music", search: nativeFirst("ytmusic", youtubeMusicSearch, ytdlpSearch("ytmusic", (query) => `https://music.youtube.com/search?q=${encodeURIComponent(query)}#songs`)) },
   bandcamp: { label: "Bandcamp", search: bandcampSearch },
   audius: { label: "Audius", search: audiusSearch },
-  soundcloud: { label: "SoundCloud", search: ytdlpSearch("soundcloud", (query, limit) => `scsearch${limit}:${query}`) }
+  soundcloud: { label: "SoundCloud", search: nativeFirst("soundcloud", soundcloudSearch, ytdlpSearch("soundcloud", (query, limit) => `scsearch${limit}:${query}`)) }
 };
 
 export async function searchMedia(provider: SearchProvider, query: string, limit: number, timeoutMs: number): Promise<SearchResult[]> {

@@ -5,7 +5,7 @@
  * aparte que arrancar: una petición y suena.
  */
 
-import { Constants, Innertube, Platform } from "youtubei.js";
+import { Constants, Innertube, Platform, YTNodes } from "youtubei.js";
 import type { Types } from "youtubei.js";
 type InnerTubeClient = Types.InnerTubeClient;
 import { soundcloudClientId } from "./soundcloud.js";
@@ -145,4 +145,57 @@ export async function soundcloudDirect(url: string): Promise<DirectAudio | null>
     } catch { /* se prueba la siguiente versión */ }
   }
   throw new Error("SoundCloud no dio ninguna versión reproducible");
+}
+
+export type NativeSearchResult = { id: string; title: string; uploader: string | null; durationSeconds: number | null; thumbnailUrl: string | null; url: string };
+
+/** Búsqueda en YouTube con la sesión abierta: unos cientos de ms en vez de los 4-5 s de yt-dlp. */
+export async function youtubeSearch(query: string, limit: number): Promise<NativeSearchResult[]> {
+  const yt = await youtube("lite");
+  const search = await yt.search(query, { type: "video" });
+  const found: NativeSearchResult[] = [];
+  for (const node of search.results) {
+    if (!node.is(YTNodes.Video)) continue;
+    const video = node.as(YTNodes.Video);
+    if (!video.video_id || video.is_live) continue;
+    found.push({ id: video.video_id, title: video.title.toString(), uploader: video.author?.name ?? null, durationSeconds: video.duration?.seconds || null, thumbnailUrl: `https://i.ytimg.com/vi/${video.video_id}/mqdefault.jpg`, url: `https://www.youtube.com/watch?v=${video.video_id}` });
+    if (found.length >= limit) break;
+  }
+  return found;
+}
+
+/** Canciones de YouTube Music (con artista y duración de la canción). */
+export async function youtubeMusicSearch(query: string, limit: number): Promise<NativeSearchResult[]> {
+  const yt = await youtube("lite");
+  const search = await yt.music.search(query, { type: "song" });
+  const found: NativeSearchResult[] = [];
+  for (const node of search.songs?.contents ?? []) {
+    if (!node.is(YTNodes.MusicResponsiveListItem)) continue;
+    const song = node.as(YTNodes.MusicResponsiveListItem);
+    if (!song.id || !/^[\w-]{11}$/.test(song.id)) continue;
+    const thumbnail = song.thumbnail?.contents?.at(-1)?.url ?? `https://i.ytimg.com/vi/${song.id}/mqdefault.jpg`;
+    found.push({ id: song.id, title: song.title ?? "", uploader: song.artists?.map((artist) => artist.name).join(", ") || null, durationSeconds: song.duration?.seconds || null, thumbnailUrl: thumbnail, url: `https://www.youtube.com/watch?v=${song.id}` });
+    if (found.length >= limit) break;
+  }
+  return found;
+}
+
+/** Búsqueda en SoundCloud con su API pública (la misma que usa su web). */
+export async function soundcloudSearch(query: string, limit: number): Promise<NativeSearchResult[]> {
+  const request = async (retry: boolean): Promise<Response> => {
+    const clientId = await soundcloudClientId(!retry);
+    const response = await fetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&limit=${limit}&client_id=${clientId}`, { signal: AbortSignal.timeout(8000) });
+    if ((response.status === 401 || response.status === 403) && retry) return request(false);
+    if (!response.ok) throw new Error(`SoundCloud respondió ${response.status}`);
+    return response;
+  };
+  const data = await (await request(true)).json() as { collection?: Array<{ id?: number; title?: string; duration?: number; full_duration?: number; artwork_url?: string | null; permalink_url?: string; user?: { username?: string; avatar_url?: string } }> };
+  return (data.collection ?? []).filter((track) => track.permalink_url && track.title).slice(0, limit).map((track) => ({
+    id: String(track.id ?? ""),
+    title: track.title as string,
+    uploader: track.user?.username ?? null,
+    durationSeconds: typeof (track.full_duration ?? track.duration) === "number" ? Math.round((track.full_duration ?? track.duration as number) / 1000) : null,
+    thumbnailUrl: (track.artwork_url ?? track.user?.avatar_url ?? null)?.replace("-large.", "-t500x500.") ?? null,
+    url: track.permalink_url as string
+  }));
 }
