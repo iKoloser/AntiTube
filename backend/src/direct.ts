@@ -1,18 +1,20 @@
 /**
- * Vía directa para escuchar al instante: en vez de arrancar yt-dlp (un programa
- * aparte que tarda segundos en abrir, cargar la página y resolverla), el motor
- * pide el audio a YouTube o SoundCloud con una sola petición, como hacen sus
- * propias apps. Si algo no cuadra, se devuelve null y se usa yt-dlp como siempre.
+ * Motor de streaming propio, sin yt-dlp. YouTube se resuelve dentro del propio
+ * motor con YouTube.js (la misma API interna que usan sus apps, con su sesión y
+ * el descifrado de firmas), y SoundCloud con su API pública. Ningún programa
+ * aparte que arrancar: una petición y suena.
  */
 
+import { Innertube, Platform } from "youtubei.js";
+import type { Types } from "youtubei.js";
+type InnerTubeClient = Types.InnerTubeClient;
 import { soundcloudClientId } from "./soundcloud.js";
 
-export type DirectAudio = { url: string; headers: Record<string, string>; duration: number | null; title: string | null; hls: boolean };
+export type DirectAudio = { url: string; headers: Record<string, string>; duration: number | null; title: string | null; hls: boolean; mime: string | null; bitrate: number | null; via: string };
 
-// Mismo cliente que usa yt-dlp para YouTube sin reproductor web (Android VR):
-// URLs directas, sin firmas que descifrar ni retos de JavaScript.
-const vrVersion = "1.65.10";
-const vrAgent = `com.google.android.apps.youtube.vr.oculus/${vrVersion} (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip`;
+// El reproductor de YouTube trae una función que hay que ejecutar para descifrar
+// las URLs: se ejecuta aquí, aislada en su propia función.
+Platform.shim.eval = (data, env) => new Function("n", "sp", "sig", `${data.output}\nreturn process(n, sp, sig);`)(env.n ?? "", env.sp ?? "", env.sig ?? "");
 
 export function youtubeVideoId(value: string): string | null {
   try {
@@ -29,56 +31,98 @@ export function youtubeVideoId(value: string): string | null {
   }
 }
 
-type YouTubeFormat = { itag?: number; url?: string; mimeType?: string; bitrate?: number; approxDurationMs?: string; audioQuality?: string };
+// Una sesión de YouTube abierta para toda la app: se prepara al arrancar y se
+// renueva cada pocas horas (el reproductor de YouTube cambia a menudo).
+let session: { client: Promise<Innertube>; created: number } | null = null;
+const sessionLifetime = 6 * 60 * 60 * 1000;
+
+function youtube(): Promise<Innertube> {
+  if (!session || Date.now() - session.created > sessionLifetime) {
+    const started = Date.now();
+    const client = Innertube.create({ retrieve_player: true, lang: "es", location: "ES" });
+    client.then(() => console.log(`[youtube] sesión lista en ${Date.now() - started} ms`), (error) => {
+      console.error(`[youtube] no se pudo abrir la sesión: ${error instanceof Error ? error.message : String(error)}`);
+      session = null;
+    });
+    session = { client, created: Date.now() };
+  }
+  return session.client;
+}
+
+/** Abre la sesión de YouTube en segundo plano para que la primera canción no espere. */
+export function warmupStreaming(): void {
+  void youtube().catch(() => undefined);
+  void soundcloudClientId().catch(() => undefined);
+}
+
+// Clientes de YouTube por orden; el que funcione pasa a ser el primero.
+const clientOrder: InnerTubeClient[] = (process.env.ANTITUBE_YT_CLIENTS?.split(",").map((value) => value.trim()).filter(Boolean) as InnerTubeClient[] | undefined) ?? ["ANDROID_VR", "TV", "WEB_EMBEDDED", "MWEB"];
 
 export async function youtubeDirect(url: string): Promise<DirectAudio | null> {
   const videoId = youtubeVideoId(url);
   if (!videoId) return null;
-  const response = await fetch("https://www.youtube.com/youtubei/v1/player?prettyPrint=false", {
-    method: "POST",
-    signal: AbortSignal.timeout(4000),
-    headers: { "Content-Type": "application/json", "User-Agent": vrAgent, "X-YouTube-Client-Name": "28", "X-YouTube-Client-Version": vrVersion, Origin: "https://www.youtube.com" },
-    body: JSON.stringify({
-      context: { client: { clientName: "ANDROID_VR", clientVersion: vrVersion, deviceMake: "Oculus", deviceModel: "Quest 3", androidSdkVersion: 32, osName: "Android", osVersion: "12L", userAgent: vrAgent, hl: "es", gl: "ES" } },
-      videoId, contentCheckOk: true, racyCheckOk: true
-    })
-  });
-  if (!response.ok) return null;
-  const data = await response.json() as { playabilityStatus?: { status?: string }; videoDetails?: { title?: string; lengthSeconds?: string; isLive?: boolean }; streamingData?: { adaptiveFormats?: YouTubeFormat[] } };
-  if (data.playabilityStatus?.status !== "OK" || data.videoDetails?.isLive) return null;
-  const audio = (data.streamingData?.adaptiveFormats ?? []).filter((format) => format.url && format.mimeType?.startsWith("audio/"));
-  // M4A (AAC, itag 140) es lo más compatible; si no, Opus; si no, lo de más calidad.
-  const chosen = audio.find((format) => format.itag === 140) ?? audio.find((format) => format.itag === 251) ?? audio.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
-  if (!chosen?.url) return null;
-  const seconds = Number(data.videoDetails?.lengthSeconds);
-  return { url: chosen.url, headers: { "User-Agent": vrAgent }, duration: Number.isFinite(seconds) && seconds > 0 ? seconds : null, title: data.videoDetails?.title ?? null, hls: false };
+  const yt = await youtube();
+  const errors: string[] = [];
+  for (const client of [...clientOrder]) {
+    const started = Date.now();
+    try {
+      const info = await yt.getBasicInfo(videoId, { client });
+      const status = info.playability_status?.status;
+      if (status !== "OK" || info.basic_info.is_live) { errors.push(`${client}: ${status ?? "?"} ${info.playability_status?.reason ?? ""}`.trim()); continue; }
+      // Máxima calidad: el audio de más bitrate (normalmente Opus 251, ~160 kbps),
+      // sin las versiones «DRC» de volumen comprimido.
+      const audio = (info.streaming_data?.adaptive_formats ?? []).filter((format) => format.has_audio && !format.has_video && !format.is_drc);
+      const best = audio.sort((a, b) => (b.bitrate ?? 0) - (a.bitrate ?? 0))[0];
+      if (!best) { errors.push(`${client}: sin audio`); continue; }
+      const direct = await best.decipher(yt.session.player);
+      if (!direct) { errors.push(`${client}: sin URL`); continue; }
+      if (clientOrder[0] !== client) { clientOrder.splice(clientOrder.indexOf(client), 1); clientOrder.unshift(client); }
+      console.log(`[youtube] ${videoId} con ${client} en ${Date.now() - started} ms (itag ${best.itag}, ${Math.round((best.bitrate ?? 0) / 1000)} kbps)`);
+      return { url: direct, headers: {}, duration: info.basic_info.duration ?? null, title: info.basic_info.title ?? null, hls: false, mime: best.mime_type ?? null, bitrate: best.bitrate ?? null, via: client };
+    } catch (error) {
+      errors.push(`${client}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 160));
+    }
+  }
+  throw new Error(`YouTube no dio audio (${errors.join(" | ")})`);
 }
 
-type Transcoding = { url?: string; snipped?: boolean; format?: { protocol?: string; mime_type?: string } };
+type Transcoding = { url?: string; snipped?: boolean; preset?: string; quality?: string; format?: { protocol?: string; mime_type?: string } };
+
+// Calidad aproximada de cada versión que ofrece SoundCloud, para quedarse con la mejor.
+function soundcloudRank(item: Transcoding): number {
+  const preset = item.preset ?? "";
+  const mime = item.format?.mime_type ?? "";
+  const kbps = Number(/(\d+)k/.exec(preset)?.[1]) || (/aac|mp4/.test(mime) ? (item.quality === "hq" ? 256 : 160) : /mpeg/.test(mime) ? 128 : /opus|ogg/.test(mime) ? 64 : 0);
+  // A igual calidad, mejor progresivo (se reenvía tal cual y se puede saltar sin FFmpeg).
+  return kbps * 10 + (item.format?.protocol === "progressive" ? 5 : 0);
+}
 
 export async function soundcloudDirect(url: string): Promise<DirectAudio | null> {
   let host = "";
   try { host = new URL(url).hostname; } catch { return null; }
   if (!/(^|\.)soundcloud\.com$/.test(host)) return null;
-  const clientId = await soundcloudClientId();
+  const started = Date.now();
+  const fetchJson = async (target: string, retry = true): Promise<Record<string, unknown>> => {
+    const clientId = await soundcloudClientId(!retry);
+    const response = await fetch(`${target}${target.includes("?") ? "&" : "?"}client_id=${clientId}`, { signal: AbortSignal.timeout(5000) });
+    if ((response.status === 401 || response.status === 403) && retry) return fetchJson(target, false);
+    if (!response.ok) throw new Error(`SoundCloud respondió ${response.status}`);
+    return response.json() as Promise<Record<string, unknown>>;
+  };
   const resolveUrl = /api(-v2)?\.soundcloud\.com\/tracks\/\d+/.test(url)
-    ? `${url.split("?")[0].replace("api.soundcloud.com", "api-v2.soundcloud.com")}?client_id=${clientId}`
-    : `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(url)}&client_id=${clientId}`;
-  const trackResponse = await fetch(resolveUrl, { signal: AbortSignal.timeout(4000) });
-  if (!trackResponse.ok) return null;
-  const track = await trackResponse.json() as { kind?: string; title?: string; duration?: number; full_duration?: number; track_authorization?: string; media?: { transcodings?: Transcoding[] } };
+    ? url.split("?")[0].replace("api.soundcloud.com", "api-v2.soundcloud.com")
+    : `https://api-v2.soundcloud.com/resolve?url=${encodeURIComponent(url)}`;
+  const track = await fetchJson(resolveUrl) as { kind?: string; title?: string; duration?: number; full_duration?: number; track_authorization?: string; media?: { transcodings?: Transcoding[] } };
   if (track.kind !== "track") return null;
-  const options = (track.media?.transcodings ?? []).filter((item) => item.url && !item.snipped);
-  // Progresivo (MP3 entero) si lo hay: se reenvía tal cual. Si no, HLS (AAC u Opus).
-  const chosen = options.find((item) => item.format?.protocol === "progressive")
-    ?? options.find((item) => item.format?.protocol === "hls" && /mp4|aac/.test(item.format?.mime_type ?? ""))
-    ?? options.find((item) => item.format?.protocol === "hls" && /mpeg/.test(item.format?.mime_type ?? ""))
-    ?? options.find((item) => item.format?.protocol === "hls");
-  if (!chosen?.url) return null;
-  const streamResponse = await fetch(`${chosen.url}?client_id=${clientId}${track.track_authorization ? `&track_authorization=${track.track_authorization}` : ""}`, { signal: AbortSignal.timeout(4000) });
-  if (!streamResponse.ok) return null;
-  const stream = await streamResponse.json() as { url?: string };
-  if (!stream.url) return null;
-  const milliseconds = track.full_duration ?? track.duration;
-  return { url: stream.url, headers: {}, duration: typeof milliseconds === "number" ? milliseconds / 1000 : null, title: track.title ?? null, hls: chosen.format?.protocol === "hls" };
+  const options = (track.media?.transcodings ?? []).filter((item) => item.url && !item.snipped).sort((a, b) => soundcloudRank(b) - soundcloudRank(a));
+  for (const chosen of options) {
+    try {
+      const stream = await fetchJson(`${chosen.url}${track.track_authorization ? `?track_authorization=${track.track_authorization}` : ""}`) as { url?: string };
+      if (!stream.url) continue;
+      const milliseconds = track.full_duration ?? track.duration;
+      console.log(`[soundcloud] ${chosen.preset ?? chosen.format?.mime_type} (${chosen.format?.protocol}) en ${Date.now() - started} ms`);
+      return { url: stream.url, headers: {}, duration: typeof milliseconds === "number" ? milliseconds / 1000 : null, title: track.title ?? null, hls: chosen.format?.protocol === "hls", mime: chosen.format?.mime_type ?? null, bitrate: null, via: `soundcloud ${chosen.preset ?? ""}`.trim() };
+    } catch { /* se prueba la siguiente versión */ }
+  }
+  throw new Error("SoundCloud no dio ninguna versión reproducible");
 }

@@ -188,7 +188,7 @@ export async function searchMedia(provider: SearchProvider, query: string, limit
 }
 
 /** `fallback`: URL original para reintentar por tubería (yt-dlp + FFmpeg) si la directa falla. */
-type PreviewSource = { url: string; headers: Record<string, string>; expires: number; fallback?: string; hls?: { duration: number | null }; direct?: boolean };
+type PreviewSource = { url: string; headers: Record<string, string>; expires: number; fallback?: string; hls?: { duration: number | null }; direct?: boolean; head?: { data: Buffer; total: number | null; type: string | null } | null };
 const previews = new Map<string, PreviewSource>();
 
 function prunePreviews(): void {
@@ -318,74 +318,65 @@ function directBroke(url: string): void {
 // Conexiones reutilizables con la plataforma: cada trozo no repite el saludo TLS.
 const keepAlive = { http: new http.Agent({ keepAlive: true, maxSockets: 16 }), https: new https.Agent({ keepAlive: true, maxSockets: 16 }) };
 
-/** Comprueba que una URL de audio responde de verdad (pide 1 byte). */
-function probeAudio(url: string, headers: Record<string, string>, redirects = 0): Promise<boolean> {
+// Primeros segundos de cada canción preparada, guardados en memoria: al darle
+// a reproducir suenan al momento, sin esperar ni a la primera respuesta de la
+// plataforma, mientras el resto llega por detrás.
+const headBytes = 384 * 1024;
+type Head = { data: Buffer; total: number | null; type: string | null };
+
+function fetchHead(url: string, headers: Record<string, string>, redirects = 0): Promise<Head | null> {
   return new Promise((resolve) => {
     const client = url.startsWith("https:") ? https : http;
-    const request = client.get(url, { headers: { ...headers, Range: "bytes=0-0" }, agent: url.startsWith("https:") ? keepAlive.https : keepAlive.http }, (upstream) => {
-      upstream.resume();
+    const request = client.get(url, { headers: { ...headers, Range: `bytes=0-${headBytes - 1}` }, agent: url.startsWith("https:") ? keepAlive.https : keepAlive.http }, (upstream) => {
       const status = upstream.statusCode ?? 0;
       const location = upstream.headers.location;
-      if (location && status >= 300 && status < 400 && redirects < 3) { resolve(probeAudio(new URL(location, url).toString(), headers, redirects + 1)); return; }
-      resolve(status === 200 || status === 206);
+      if (location && status >= 300 && status < 400 && redirects < 3) { upstream.resume(); resolve(fetchHead(new URL(location, url).toString(), headers, redirects + 1)); return; }
+      if (status !== 200 && status !== 206) { upstream.resume(); resolve(null); return; }
+      const total = status === 206 ? Number(/\/(\d+)$/.exec(String(upstream.headers["content-range"] ?? ""))?.[1]) || null : Number(upstream.headers["content-length"]) || null;
+      const parts: Buffer[] = [];
+      let size = 0;
+      upstream.on("data", (chunk: Buffer) => {
+        parts.push(chunk); size += chunk.length;
+        if (size >= headBytes) upstream.destroy();
+      });
+      const done = () => resolve(size > 0 ? { data: Buffer.concat(parts).subarray(0, headBytes), total, type: upstream.headers["content-type"] ?? null } : null);
+      upstream.on("end", done);
+      upstream.on("close", done);
     });
-    request.setTimeout(3000, () => request.destroy(new Error("timeout")));
-    request.on("error", () => resolve(false));
+    request.setTimeout(6000, () => request.destroy(new Error("timeout")));
+    request.on("error", () => resolve(null));
   });
 }
 
 async function resolveDirect(url: string) {
   const started = Date.now();
-  try {
-    const direct = await youtubeDirect(url) ?? await soundcloudDirect(url);
-    // Se comprueba que el enlace suena antes de darlo por bueno: si no, lo
-    // preparado por adelantado fallaría justo al darle a reproducir.
-    if (direct && await probeAudio(direct.url, direct.headers)) {
-      console.log(`[listen] vía directa en ${Date.now() - started} ms`);
-      directWorked(url);
-      return { duration: direct.duration, title: direct.title, thumbnailUrl: null, source: { url: direct.url, headers: direct.headers, direct: true, ...(direct.hls ? { hls: { duration: direct.duration } } : {}) }, audio: null, hasVideo: false };
-    }
-    console.log(`[listen] vía directa sin audio válido (${Date.now() - started} ms)`);
-  } catch (error) {
-    console.error(`[listen] la vía directa falló: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  directBroke(url);
-  return null;
+  const direct = await youtubeDirect(url) ?? await soundcloudDirect(url);
+  if (!direct) return null;
+  console.log(`[listen] motor propio (${direct.via}) en ${Date.now() - started} ms`);
+  return { duration: direct.duration, title: direct.title, thumbnailUrl: null, source: { url: direct.url, headers: direct.headers, direct: true, ...(direct.hls ? { hls: { duration: direct.duration } } : {}) }, audio: null, hasVideo: false };
 }
 
 type Resolved = { duration: number | null; title: string | null; thumbnailUrl: string | null; source: Omit<PreviewSource, "expires">; audio: unknown; hasVideo: boolean } | null;
 
 /**
- * La vía directa tiene 1,5 s de ventaja; si no ha contestado para entonces (o
- * falla), yt-dlp arranca a la vez y gana el primero que traiga audio.
+ * YouTube y SoundCloud van por el motor propio (sin yt-dlp). yt-dlp solo entra
+ * como último recurso si el motor propio no puede con una canción concreta, o
+ * para otras plataformas.
  */
 async function resolveListen(url: string, timeoutMs: number): Promise<Resolved> {
   const started = Date.now();
-  const viaYtDlp = () => resolveWithYtDlp(url, timeoutMs).then((result) => { console.log(`[listen] yt-dlp en ${Date.now() - started} ms`); return result; });
-  if (!directUsable(url)) return viaYtDlp();
-  return new Promise<Resolved>((resolve, reject) => {
-    let settled = false;
-    let directDone = false;
-    let ytdlp: Promise<Resolved> | null = null;
-    let ytdlpError: unknown = null;
-    let ytdlpDone = false;
-    const finish = (value: Resolved) => { if (!settled) { settled = true; clearTimeout(timer); resolve(value); } };
-    const startYtDlp = () => {
-      if (ytdlp) return;
-      ytdlp = viaYtDlp();
-      ytdlp.then((value) => { ytdlpDone = true; if (value || directDone) finish(value); }, (error) => {
-        ytdlpDone = true; ytdlpError = error;
-        if (directDone && !settled) { settled = true; reject(error); }
-      });
-    };
-    const timer = setTimeout(startYtDlp, 1500);
-    void resolveDirect(url).then((value) => {
-      directDone = true;
-      if (value) { finish(value); return; }
-      if (!ytdlp) { startYtDlp(); return; }
-      if (ytdlpDone && !settled) { settled = true; if (ytdlpError) reject(ytdlpError); else resolve(null); }
-    });
-  });
+  if (directUsable(url)) {
+    try {
+      const direct = await resolveDirect(url);
+      if (direct) { directWorked(url); return direct; }
+    } catch (error) {
+      console.error(`[listen] motor propio falló en ${Date.now() - started} ms: ${error instanceof Error ? error.message : String(error)}`);
+      directBroke(url);
+    }
+  }
+  const viaYtDlp = await resolveWithYtDlp(url, timeoutMs);
+  console.log(`[listen] yt-dlp (último recurso) en ${Date.now() - started} ms`);
+  return viaYtDlp;
 }
 
 async function resolveWithYtDlp(url: string, timeoutMs: number) {
@@ -398,11 +389,14 @@ async function resolveWithYtDlp(url: string, timeoutMs: number) {
   return resolvePreview(url, "audio", timeoutMs);
 }
 
-async function listenToken(url: string, timeoutMs: number): Promise<string> {
+async function listenToken(url: string, timeoutMs: number, prefetch = false): Promise<string> {
   const cached = listenCache.get(url);
-  if (cached && cached.expires > Date.now() && previews.has(cached.token)) return cached.token;
+  if (cached && cached.expires > Date.now() && previews.has(cached.token)) {
+    if (prefetch) await prefetchHead(cached.token);
+    return cached.token;
+  }
   const pending = listenPending.get(url);
-  if (pending) return pending;
+  if (pending) return pending.then(async (token) => { if (prefetch) await prefetchHead(token); return token; });
   const job = (async () => {
     const resolved = await resolveListen(url, timeoutMs);
     if (!resolved) throw new Error("Sin audio directo");
@@ -416,12 +410,34 @@ async function listenToken(url: string, timeoutMs: number): Promise<string> {
     return token;
   })().finally(() => listenPending.delete(url));
   listenPending.set(url, job);
-  return job;
+  const token = await job;
+  if (prefetch) await prefetchHead(token);
+  return token;
 }
 
-// MP3 a 192 kbps constantes: 24.000 bytes por segundo. Así cada byte que pide el
+// Solo se guardan los primeros segundos de unas pocas canciones a la vez.
+const heads: string[] = [];
+async function prefetchHead(token: string): Promise<void> {
+  const source = previews.get(token);
+  if (!source || source.hls || source.head !== undefined) return;
+  source.head = null;
+  const head = await fetchHead(source.url, source.headers);
+  if (!head) {
+    // El enlace no suena: se olvida para que al pulsar se resuelva de nuevo.
+    console.error("[listen] el audio preparado no responde; se volverá a pedir");
+    if (source.direct && source.fallback) directBroke(source.fallback);
+    if (source.fallback) forgetListen(source.fallback);
+    previews.delete(token);
+    return;
+  }
+  source.head = head;
+  heads.push(token);
+  while (heads.length > 40) { const old = previews.get(heads.shift() as string); if (old) old.head = undefined; }
+}
+
+// MP3 a 320 kbps constantes (la máxima calidad de MP3): 40.000 bytes por segundo. Así cada byte que pide el
 // reproductor corresponde a un instante y se puede saltar dentro de un HLS.
-const hlsBytesPerSecond = 24_000;
+const hlsBytesPerSecond = 40_000;
 
 function streamHls(source: PreviewSource, request: Request, response: Response): void {
   const duration = source.hls?.duration ?? null;
@@ -434,7 +450,7 @@ function streamHls(source: PreviewSource, request: Request, response: Response):
     "-nostdin", "-hide_banner", "-loglevel", "error",
     ...(from > 0 ? ["-ss", (from / hlsBytesPerSecond).toFixed(2)] : []),
     ...(headers ? ["-headers", headers] : []),
-    "-i", source.url, "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "-write_xing", "0", "-f", "mp3", "pipe:1"
+    "-i", source.url, "-vn", "-c:a", "libmp3lame", "-b:a", "320k", "-write_xing", "0", "-f", "mp3", "pipe:1"
   ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   let errors = "";
   ffmpeg.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-1000); });
@@ -555,7 +571,7 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
     if (request.query.fresh === "1") forgetListen(analysis.url);
     try {
       // Lo que se prepara por adelantado espera turno; lo que pulsas, no.
-      const token = warm && request.query.now !== "1" ? await warmSlot(() => listenToken(analysis.url, deps.metadataTimeoutMs)) : await listenToken(analysis.url, deps.metadataTimeoutMs);
+      const token = warm && request.query.now !== "1" ? await warmSlot(() => listenToken(analysis.url, deps.metadataTimeoutMs, true)) : await listenToken(analysis.url, deps.metadataTimeoutMs, warm);
       if (warm) { response.status(204).end(); return; }
       response.setHeader("Cache-Control", "no-store");
       response.redirect(302, `/api/preview/stream/${token}`);
@@ -725,6 +741,28 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
         void pump(false);
       });
     };
+    // Si los primeros segundos ya están en memoria, suenan al instante y el resto
+    // se pide a la plataforma mientras tanto.
+    const head = source.head;
+    if (head && head.total && from < head.data.length) {
+      total = head.total;
+      const end = Math.min(until ?? total - 1, total - 1);
+      if (head.type) response.setHeader("Content-Type", head.type);
+      response.setHeader("Accept-Ranges", "bytes");
+      response.setHeader("Content-Length", String(end - from + 1));
+      if (asked) {
+        response.status(206);
+        response.setHeader("Content-Range", `bytes ${from}-${end}/${total}`);
+      } else {
+        response.status(200);
+      }
+      const slice = head.data.subarray(from, Math.min(head.data.length, end + 1));
+      response.write(slice);
+      position = from + slice.length;
+      if (position > end) { response.end(); return; }
+      await pump(false);
+      return;
+    }
     await pump(true);
   });
 

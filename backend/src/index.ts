@@ -12,6 +12,7 @@ import { createAppUpdateRouter } from "./appUpdate.js";
 import { createJobsRouter, rebalanceQueue } from "./jobs.js";
 import { createLibraryRouter } from "./library.js";
 import { createMediaRouter } from "./media.js";
+import { warmupStreaming } from "./direct.js";
 import { defaultDownloadDirectory, downloadDirectory, loadSettings, maxConcurrentDownloads, setDownloadDirectory, setMaxConcurrentDownloads } from "./settings.js";
 import { addToHistory, listHistory, removeFromHistory } from "./shazamHistory.js";
 import { autoUpdateTools, checkUpdates, detectTools, runSetup, runUpdate, setupStatus, type SetupStepId } from "./setup.js";
@@ -453,6 +454,8 @@ if (desktopMode) {
   process.stdin.on("error", () => process.exit(0));
   process.stdin.resume();
   void detectTools().then(() => autoUpdateTools());
+  // Sesión de YouTube y SoundCloud abierta desde el principio: la primera canción no espera.
+  warmupStreaming();
   void loadSettings().finally(() => {
     // Restos de descargas interrumpidas al cerrar la app.
     void rm(path.join(downloadDirectory(), ".antitube-temp"), { recursive: true, force: true }).catch(() => undefined);
