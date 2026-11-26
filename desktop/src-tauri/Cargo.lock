@@ -65,7 +65,7 @@ dependencies = [
 
 [[package]]
 name = "antitube"
-version = "1.0.0-beta.11"
+version = "1.0.0-beta.14"
 dependencies = [
  "cpal",
  "discord-rich-presence",

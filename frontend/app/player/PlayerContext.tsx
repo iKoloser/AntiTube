@@ -114,6 +114,7 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const restoredRef = useRef<{ position: number } | null>(null);
   const wantPlayRef = useRef(false);
+  const retriedRef = useRef<string | null>(null);
   const stateRef = useRef({ queue, index, settings });
   stateRef.current = { queue, index, settings };
 
@@ -248,7 +249,7 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
     .join("\n");
   useEffect(() => {
     if (!nearbyStreams) return;
-    const timer = window.setTimeout(() => nearbyStreams.split("\n").forEach((url) => warmStream(url)), 300);
+    const timer = window.setTimeout(() => nearbyStreams.split("\n").forEach((url, order) => warmStream(url, order === 0)), 150);
     return () => window.clearTimeout(timer);
   }, [nearbyStreams]);
 
@@ -291,6 +292,16 @@ export function PlayerProvider({ children }: Readonly<{ children: React.ReactNod
       const { queue: list, index: position } = stateRef.current;
       const failed = list[position];
       if (failed?.id.startsWith("listen:")) {
+        // Un corte de red o un enlace caducado: se vuelve a pedir una vez desde
+        // el mismo segundo antes de rendirse.
+        if (retriedRef.current !== failed.id && failed.src) {
+          retriedRef.current = failed.id;
+          const at = audio.currentTime;
+          audio.src = `${absolute(failed.src)}&fresh=1`;
+          if (at > 0) audio.addEventListener("loadedmetadata", () => { audio.currentTime = at; }, { once: true });
+          if (wantPlayRef.current) void audio.play().catch(() => undefined);
+          return;
+        }
         // En streaming, una canción que no se puede sacar no corta la cola.
         setError(`No se pudo escuchar «${failed.title}» en streaming.`);
         if (position + 1 < list.length) { window.setTimeout(() => next(true), 400); return; }

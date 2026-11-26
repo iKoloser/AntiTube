@@ -29,7 +29,7 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 ### Buscar y descargar
 
 - **Buscador integrado** en YouTube, YouTube Music, Bandcamp, Audius y SoundCloud. Se buscan varias plataformas a la vez y cada resultado se puede escuchar, ver, abrir con todas las opciones o mandar directo a la cola.
-- **Escuchar en streaming sin descargar:** «Escuchar» reproduce solo el audio al momento y sigue con el resto de resultados como una cola; «Escuchar todo» los pone todos, ＋ añade uno a la cola y una playlist pegada también se puede escuchar entera. Suena mientras carga, como en YouTube o Spotify. Los primeros resultados (y el que tienes bajo el ratón) y las canciones de alrededor en la cola se preparan por adelantado, así que suenan al pulsar y no hay silencios al cambiar. Lo que no tiene audio directo (solo HLS, enlaces que la plataforma rechaza…) se escucha igualmente a través de yt-dlp y FFmpeg.
+- **Escuchar en streaming sin descargar:** «Escuchar» reproduce solo el audio al momento y sigue con el resto de resultados como una cola. «Escuchar todo» los pone todos, ＋ añade uno a la cola y una playlist pegada también se puede escuchar entera. Suena al instante, como en YouTube o Spotify, porque AntiTube tiene su propio motor de streaming sin yt-dlp. YouTube se resuelve dentro de la app con [YouTube.js](https://github.com/LuanRT/YouTube.js) (la API interna de YouTube, cliente visionOS), en unos 100 ms y en la máxima calidad que da YouTube sin Premium (Opus de unos 160 kbps). SoundCloud se resuelve con su API pública y se pasa a MP3 de 320 kbps. Cada canción se baja entera a memoria de una sola vez, en menos de medio segundo, y empieza a sonar con los primeros bytes. Los saltos dentro de la canción son locales y las canciones de alrededor en la cola ya están descargadas antes de llegar a ellas. yt-dlp solo entra como último recurso.
 - **Playlists de SoundCloud** con el título, el artista y la portada de cada canción, listas para escuchar en streaming. Las canciones que SoundCloud solo emite troceadas (HLS) suenan al momento y también se puede avanzar o retroceder.
 - **Pega cualquier enlace** de los más de 1.000 sitios que soporta yt-dlp: YouTube, TikTok, Twitch, Twitter/X, Vimeo, Instagram, Reddit, Bilibili y más.
 - **Formatos de audio reales**, sin conversiones que empeoren el sonido:
@@ -111,7 +111,8 @@ flowchart LR
 | Interfaz | Next.js 16, React 19, TypeScript, CSS propio |
 | Reproductor | Web Audio (ecualizador, visualizador), Media Session |
 | Motor local | Node 22, Express 5, TypeScript, empaquetado con esbuild |
-| Descargas y búsqueda | yt-dlp, APIs públicas de Bandcamp y Audius |
+| Streaming y búsqueda | Motor propio: YouTube.js (YouTube y YouTube Music) y API de SoundCloud, con yt-dlp de reserva |
+| Descargas | yt-dlp, APIs públicas de Bandcamp y Audius |
 | Conversión y vídeo | FFmpeg |
 | Metadatos de la biblioteca | music-metadata |
 | Reconocimiento | Python + ShazamIO |
@@ -137,6 +138,8 @@ AntiTube/
 │       ├── downloader.ts  # yt-dlp: formatos reales, recortes, playlists
 │       ├── jobs.ts        # Cola de descargas en paralelo
 │       ├── media.ts       # Búsqueda y vista previa en streaming
+│       ├── direct.ts      # Motor propio: YouTube.js y SoundCloud, sin yt-dlp
+│       ├── audiocache.ts  # Canciones en memoria para sonar y saltar al instante
 │       ├── library.ts     # Biblioteca, listas, conversión para reproducir
 │       ├── setup.ts       # Instalación y actualización de herramientas
 │       └── appUpdate.ts   # Actualizaciones de la app

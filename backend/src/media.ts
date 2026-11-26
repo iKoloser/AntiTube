@@ -4,6 +4,8 @@ import http, { type IncomingMessage } from "node:http";
 import https from "node:https";
 import { promisify } from "node:util";
 import { Router, type Request, type Response } from "express";
+import { ensureAudio, forgetAudio, serveAudio, type AudioSource } from "./audiocache.js";
+import { demoteYouTubeClient, soundcloudDirect, soundcloudSearch, youtubeDirect, youtubeMusicSearch, youtubeSearch, type NativeSearchResult } from "./direct.js";
 import { ExtractorLookupError, ExtractorUnavailableError, getMediaMetadata } from "./extractor.js";
 
 /**
@@ -174,12 +176,29 @@ const audiusSearch: ProviderSearch = async (query, limit, timeoutMs) => {
     }));
 };
 
+/** Búsqueda propia (rápida); si falla o no da nada, la de yt-dlp. */
+function nativeFirst(provider: SearchProvider, native: (query: string, limit: number) => Promise<NativeSearchResult[]>, fallback: ProviderSearch): ProviderSearch {
+  return async (query, limit, timeoutMs) => {
+    const started = Date.now();
+    try {
+      const found = await native(query, limit);
+      if (found.length > 0) {
+        console.log(`[search] ${provider} en ${Date.now() - started} ms`);
+        return found.map((item) => ({ provider, ...item }));
+      }
+    } catch (error) {
+      console.error(`[search] ${provider} propio falló: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    return fallback(query, limit, timeoutMs);
+  };
+}
+
 export const searchProviders: Record<SearchProvider, { label: string; search: ProviderSearch }> = {
-  youtube: { label: "YouTube", search: ytdlpSearch("youtube", (query, limit) => `ytsearch${limit}:${query}`) },
-  ytmusic: { label: "YouTube Music", search: ytdlpSearch("ytmusic", (query) => `https://music.youtube.com/search?q=${encodeURIComponent(query)}#songs`) },
+  youtube: { label: "YouTube", search: nativeFirst("youtube", youtubeSearch, ytdlpSearch("youtube", (query, limit) => `ytsearch${limit}:${query}`)) },
+  ytmusic: { label: "YouTube Music", search: nativeFirst("ytmusic", youtubeMusicSearch, ytdlpSearch("ytmusic", (query) => `https://music.youtube.com/search?q=${encodeURIComponent(query)}#songs`)) },
   bandcamp: { label: "Bandcamp", search: bandcampSearch },
   audius: { label: "Audius", search: audiusSearch },
-  soundcloud: { label: "SoundCloud", search: ytdlpSearch("soundcloud", (query, limit) => `scsearch${limit}:${query}`) }
+  soundcloud: { label: "SoundCloud", search: nativeFirst("soundcloud", soundcloudSearch, ytdlpSearch("soundcloud", (query, limit) => `scsearch${limit}:${query}`)) }
 };
 
 export async function searchMedia(provider: SearchProvider, query: string, limit: number, timeoutMs: number): Promise<SearchResult[]> {
@@ -187,7 +206,7 @@ export async function searchMedia(provider: SearchProvider, query: string, limit
 }
 
 /** `fallback`: URL original para reintentar por tubería (yt-dlp + FFmpeg) si la directa falla. */
-type PreviewSource = { url: string; headers: Record<string, string>; expires: number; fallback?: string; hls?: { duration: number | null } };
+type PreviewSource = { url: string; headers: Record<string, string>; expires: number; fallback?: string; hls?: { duration: number | null }; direct?: boolean };
 const previews = new Map<string, PreviewSource>();
 
 function prunePreviews(): void {
@@ -252,11 +271,6 @@ async function resolvePreview(url: string, kind: PreviewKind, timeoutMs: number,
   return { ...common, source: { url: chosen.url, headers: headersOf(chosen) }, audio: null, hasVideo: kind !== "audio" && hasVideoTrack(chosen) };
 }
 
-// URL original → token de audio ya resuelto (las URLs directas caducan en unas horas).
-const listenCache = new Map<string, { token: string; expires: number }>();
-const listenPending = new Map<string, Promise<string>>();
-const listenLifetimeMs = 2 * 60 * 60 * 1000;
-
 // Las preparaciones por adelantado van de dos en dos para no saturar el equipo;
 // lo que el usuario pulsa no espera a esta fila.
 let warmRunning = 0;
@@ -269,19 +283,47 @@ async function warmSlot<T>(task: () => Promise<T>): Promise<T> {
 
 const pipeUrl = (url: string) => `/api/listen/pipe?url=${encodeURIComponent(url)}`;
 
-function forgetListen(url: string): void {
-  listenCache.delete(url);
-}
-
-const isYouTube = (url: string) => /(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com)$/i.test((() => { try { return new URL(url).hostname; } catch { return ""; } })());
+const hostOf = (url: string) => { try { return new URL(url).hostname; } catch { return ""; } };
+const isYouTube = (url: string) => /(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com)$/i.test(hostOf(url));
+const isSoundCloud = (url: string) => /(^|\.)soundcloud\.com$/i.test(hostOf(url));
 
 /**
- * Solo audio, lo antes posible. En YouTube se prueba primero el cliente de
- * Android VR: da URLs directas sin descargar ni resolver el reproductor web
- * (el paso lento). Si no vale para ese vídeo (edad, música infantil…), se
- * hace la búsqueda completa de siempre.
+ * Formas de conseguir el audio de una canción, por orden. YouTube y SoundCloud
+ * van por el motor propio (sin yt-dlp); si YouTube rechaza un cliente se prueba
+ * el siguiente. yt-dlp queda solo como último recurso.
  */
-async function resolveListen(url: string, timeoutMs: number) {
+async function* listenSources(url: string, timeoutMs: number): AsyncGenerator<AudioSource> {
+  const started = Date.now();
+  if (isYouTube(url)) {
+    const tried: string[] = [];
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      let direct: Awaited<ReturnType<typeof youtubeDirect>> = null;
+      try { direct = await youtubeDirect(url, tried); } catch (error) { console.error(`[listen] ${error instanceof Error ? error.message : String(error)}`); }
+      if (!direct) break;
+      tried.push(direct.via);
+      console.log(`[listen] YouTube ${direct.via} resuelto en ${Date.now() - started} ms`);
+      yield { url: direct.url, headers: direct.headers, label: `YouTube ${direct.via}` };
+      // Si se vuelve aquí es que YouTube rechazó esa descarga: se prueba otro cliente.
+      demoteYouTubeClient(direct.via);
+    }
+  } else if (isSoundCloud(url)) {
+    try {
+      const direct = await soundcloudDirect(url);
+      if (direct) yield { url: direct.url, headers: direct.headers, hls: direct.hls ? { duration: direct.duration } : null, label: direct.via };
+    } catch (error) {
+      console.error(`[listen] SoundCloud: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  try {
+    const resolved = await resolveWithYtDlp(url, timeoutMs);
+    console.log(`[listen] yt-dlp (último recurso) en ${Date.now() - started} ms`);
+    if (resolved) yield { url: resolved.source.url, headers: resolved.source.headers, hls: resolved.source.hls ?? null, label: "yt-dlp" };
+  } catch (error) {
+    console.error(`[listen] yt-dlp: ${(error instanceof Error ? error.message : String(error)).split("\n").slice(-2).join(" ")}`);
+  }
+}
+
+async function resolveWithYtDlp(url: string, timeoutMs: number) {
   if (isYouTube(url)) {
     try {
       const quick = await resolvePreview(url, "audio", Math.min(timeoutMs, 15_000), ["--extractor-args", "youtube:player_client=android_vr", "--socket-timeout", "8"]);
@@ -291,29 +333,9 @@ async function resolveListen(url: string, timeoutMs: number) {
   return resolvePreview(url, "audio", timeoutMs);
 }
 
-async function listenToken(url: string, timeoutMs: number): Promise<string> {
-  const cached = listenCache.get(url);
-  if (cached && cached.expires > Date.now() && previews.has(cached.token)) return cached.token;
-  const pending = listenPending.get(url);
-  if (pending) return pending;
-  const job = (async () => {
-    const resolved = await resolveListen(url, timeoutMs);
-    if (!resolved) throw new Error("Sin audio directo");
-    prunePreviews();
-    const token = randomUUID();
-    const expires = Date.now() + listenLifetimeMs;
-    previews.set(token, { ...resolved.source, expires: expires + 60 * 60 * 1000, fallback: url });
-    listenCache.set(url, { token, expires });
-    if (listenCache.size > 500) listenCache.delete(listenCache.keys().next().value as string);
-    return token;
-  })().finally(() => listenPending.delete(url));
-  listenPending.set(url, job);
-  return job;
-}
-
-// MP3 a 192 kbps constantes: 24.000 bytes por segundo. Así cada byte que pide el
+// MP3 a 320 kbps constantes (la máxima calidad de MP3): 40.000 bytes por segundo. Así cada byte que pide el
 // reproductor corresponde a un instante y se puede saltar dentro de un HLS.
-const hlsBytesPerSecond = 24_000;
+const hlsBytesPerSecond = 40_000;
 
 function streamHls(source: PreviewSource, request: Request, response: Response): void {
   const duration = source.hls?.duration ?? null;
@@ -326,7 +348,7 @@ function streamHls(source: PreviewSource, request: Request, response: Response):
     "-nostdin", "-hide_banner", "-loglevel", "error",
     ...(from > 0 ? ["-ss", (from / hlsBytesPerSecond).toFixed(2)] : []),
     ...(headers ? ["-headers", headers] : []),
-    "-i", source.url, "-vn", "-c:a", "libmp3lame", "-b:a", "192k", "-write_xing", "0", "-f", "mp3", "pipe:1"
+    "-i", source.url, "-vn", "-c:a", "libmp3lame", "-b:a", "320k", "-write_xing", "0", "-f", "mp3", "pipe:1"
   ], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
   let errors = "";
   ffmpeg.stderr.on("data", (chunk: Buffer) => { errors = (errors + chunk.toString()).slice(-1000); });
@@ -434,23 +456,24 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
       response.status(400).json({ error: "URL inválida", message: "Falta la URL que quieres escuchar." });
       return;
     }
+    const url = analysis.url;
     const warm = request.query.warm === "1";
-    try {
+    // Reintento tras un corte: se descarta lo guardado y se pide de nuevo.
+    if (request.query.fresh === "1") forgetAudio(url);
+    const start = () => ensureAudio(url, () => listenSources(url, deps.metadataTimeoutMs));
+    if (warm) {
       // Lo que se prepara por adelantado espera turno; lo que pulsas, no.
-      const token = warm && request.query.now !== "1" ? await warmSlot(() => listenToken(analysis.url, deps.metadataTimeoutMs)) : await listenToken(analysis.url, deps.metadataTimeoutMs);
-      if (warm) { response.status(204).end(); return; }
-      response.setHeader("Cache-Control", "no-store");
-      response.redirect(302, `/api/preview/stream/${token}`);
+      const job = async () => { await start().ready.catch(() => undefined); };
+      await (request.query.now === "1" ? job() : warmSlot(job));
+      response.status(204).end();
+      return;
+    }
+    try {
+      await serveAudio(start(), request, response);
     } catch (error) {
-      const code = typeof error === "object" && error !== null && "code" in error ? (error as { code?: unknown }).code : null;
-      console.error(`[listen] sin audio directo, uso la tubería: ${(error instanceof Error ? error.message : String(error)).split("\n").slice(-2).join(" ")}`);
-      if (code === "ENOENT") {
-        response.status(503).json({ error: "No se puede escuchar", message: "yt-dlp no está instalado en este entorno." });
-        return;
-      }
-      // Sin URL directa (solo HLS, restricciones, etc.): yt-dlp la saca igualmente por tubería.
-      if (warm) { response.status(204).end(); return; }
-      response.redirect(302, pipeUrl(analysis.url));
+      console.error(`[listen] sin audio, uso la tubería: ${error instanceof Error ? error.message : String(error)}`);
+      if (!response.headersSent) response.redirect(302, pipeUrl(url));
+      else response.destroy();
     }
   });
 
@@ -511,14 +534,6 @@ export function createMediaRouter(deps: { metadataTimeoutMs: number; analyzeUrl:
     const fail = (reason: string) => {
       console.error(`[preview] ${reason}`);
       if (response.headersSent) { response.destroy(); return; }
-      if (source.fallback && !closed) {
-        // La plataforma rechaza la URL directa (403, caducada, sin conexión…):
-        // la próxima vez se vuelve a resolver y ahora se escucha por tubería.
-        forgetListen(source.fallback);
-        previews.delete(String(request.params.token));
-        response.redirect(302, pipeUrl(source.fallback));
-        return;
-      }
       response.status(502).json({ error: "Vista previa no disponible", message: "La plataforma no ha respondido." });
     };
 
