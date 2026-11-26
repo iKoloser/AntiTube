@@ -5,6 +5,7 @@
  * aparte que arrancar: una petición y suena.
  */
 
+import vm from "node:vm";
 import { Constants, Innertube, Platform, YTNodes } from "youtubei.js";
 import type { Types } from "youtubei.js";
 type InnerTubeClient = Types.InnerTubeClient;
@@ -13,8 +14,11 @@ import { soundcloudClientId } from "./soundcloud.js";
 export type DirectAudio = { url: string; headers: Record<string, string>; duration: number | null; title: string | null; hls: boolean; mime: string | null; bitrate: number | null; via: string };
 
 // El reproductor de YouTube trae una función que hay que ejecutar para descifrar
-// las URLs: se ejecuta aquí, aislada en su propia función.
-Platform.shim.eval = (data, env) => new Function("n", "sp", "sig", `${data.output}\nreturn process(n, sp, sig);`)(env.n ?? "", env.sp ?? "", env.sig ?? "");
+// algunas URLs (solo los clientes de respaldo; visionOS no la necesita). Se
+// ejecuta en un contexto aislado de Node, sin acceso a nada del sistema.
+Platform.shim.eval = (data, env) => vm.runInNewContext(`${data.output}\nprocess(n, sp, sig);`, {
+  n: env.n ?? "", sp: env.sp ?? "", sig: env.sig ?? "", URL, URLSearchParams, TextEncoder, TextDecoder
+}, { timeout: 3000 }) as Record<string, unknown>;
 
 export function youtubeVideoId(value: string): string | null {
   try {

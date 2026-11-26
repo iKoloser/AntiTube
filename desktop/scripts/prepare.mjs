@@ -39,8 +39,13 @@ await build({
   platform: "node",
   target: "node22",
   format: "cjs",
-  minify: true,
-  legalComments: "none",
+  // Sin minificar y con las licencias de cada librería: un único archivo
+  // enorme y ofuscado hace que los antivirus por heurística (Windows Defender
+  // «!ml») lo confundan con malware. Legible, se reconoce como lo que es.
+  minify: false,
+  keepNames: true,
+  legalComments: "inline",
+  banner: { js: "// AntiTube: motor local de la app de escritorio (https://github.com/iKoloser/AntiTube). Código abierto, licencia MIT." },
   logLevel: "info"
 });
 copyFileSync(path.join(rootDir, "backend", "shazam_recognize.py"), path.join(backendOut, "shazam_recognize.py"));
