@@ -24,6 +24,12 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 
 > **Estado:** versión estable **1.0.0**.
 
+<p align="center">
+  <img src="docs/capturas/reproductor.webp" alt="Reproductor de AntiTube con la biblioteca y la canción que suena" width="900" />
+</p>
+
+> Las capturas usan música y resultados de ejemplo.
+
 ## Funcionalidades
 
 ### Buscar y descargar
@@ -43,6 +49,21 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 - **Lote de enlaces:** pega muchas URLs de golpe.
 - **Descarga rápida:** un botón en cada resultado de búsqueda con tus ajustes favoritos.
 - **Etiquetas y portada** incrustadas en los archivos de audio.
+
+<p align="center">
+  <img src="docs/capturas/buscar.webp" alt="Búsqueda en YouTube, YouTube Music y SoundCloud a la vez" width="900" />
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/capturas/formatos.webp" alt="Elegir formato y calidad de un enlace" /></td>
+    <td width="50%"><img src="docs/capturas/recorte.webp" alt="Recortar un fragmento con vista previa" /></td>
+  </tr>
+  <tr>
+    <td align="center">Formato y calidad reales de la plataforma</td>
+    <td align="center">Recorte con vista previa</td>
+  </tr>
+</table>
 
 ### Reproductor de música y vídeo
 
@@ -71,6 +92,10 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 - **Un clic y escucha todo el PC:** en la app de escritorio, «Escuchar el sistema» graba lo que suena por los altavoces (YouTube en el navegador, Spotify, un juego…) sin elegir ventana ni pestaña. En la versión web se comparte una pestaña con audio.
 - Enlaces al resultado en YouTube, SoundCloud y Spotify, y descarga directa en MP3.
 
+<p align="center">
+  <img src="docs/capturas/shazam.webp" alt="Canción reconocida con SHAZAM e historial" width="900" />
+</p>
+
 ### Interfaz
 
 - **Consola viva:** el fondo es un horizonte de rejilla en perspectiva con lluvia de datos y chispas que laten con los graves de lo que suena.
@@ -81,6 +106,22 @@ AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https
 - **Telemetría en vivo** en la barra superior: velocidad total de descarga con su gráfica, descargas activas y reloj.
 - **Efecto CRT** opcional (líneas de barrido) y transiciones de escaneo entre secciones. Las animaciones se pueden reducir en Ajustes.
 - **Adaptable:** funciona desde ventanas grandes hasta muy estrechas, con navegación lateral plegable, y la música no se corta al cambiar de sección.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/capturas/inmersivo.webp" alt="Modo inmersivo con el visualizador a pantalla completa" /></td>
+    <td width="50%"><img src="docs/capturas/paleta.webp" alt="Paleta de comandos con Ctrl+K" /></td>
+  </tr>
+  <tr>
+    <td align="center">Modo inmersivo</td>
+    <td align="center">Paleta de comandos (<kbd>Ctrl</kbd> <kbd>K</kbd>)</td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/capturas/temas.webp" alt="Los temas Matrix, Ámbar, Neón y Red team" width="900" /><br />
+  <sub>Temas Matrix, Ámbar, Neón y Red team</sub>
+</p>
 
 ## Instalación
 
