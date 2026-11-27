@@ -22,7 +22,7 @@
 
 AntiTube es una aplicación de escritorio para Windows hecha con [Tauri 2](https://tauri.app/). Busca y descarga contenido de YouTube, YouTube Music, Bandcamp, Audius, SoundCloud y cualquier sitio compatible con [yt-dlp](https://github.com/yt-dlp/yt-dlp). Recorta el fragmento exacto que quieres viéndolo antes y lo guarda en el formato real que emite la plataforma. Incluye un reproductor de música y vídeo con biblioteca, listas, ecualizador y visualizador.
 
-> **Estado:** versión **1.0 BETA**. Sale de beta cuando se confirme que todo funciona bien en uso real.
+> **Estado:** versión estable **1.0.0**.
 
 ## Funcionalidades
 
