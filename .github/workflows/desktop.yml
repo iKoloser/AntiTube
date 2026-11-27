@@ -74,6 +74,13 @@ jobs:
             echo "Windows puede avisar con SmartScreen porque el instalador no está firmado: pulsa «Más información» › «Ejecutar de todas formas»."
           } > release-notes.md
 
+      # El motor (backend) también va suelto en la release: así se puede comprobar
+      # con el antivirus sin tener que instalar la app.
+      - name: Empaquetar el motor suelto
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: Compress-Archive -Path desktop/src-tauri/resources/backend/* -DestinationPath antitube-backend.zip
+
       # Cada push a la rama desktop publica (o actualiza) la release desktop-v<versión>.
       - name: Publicar release
         if: github.event_name == 'push'
@@ -82,7 +89,9 @@ jobs:
           tag_name: desktop-v${{ steps.version.outputs.value }}
           target_commitish: ${{ github.sha }}
           name: AntiTube Escritorio v${{ steps.version.outputs.value }}
-          files: desktop/src-tauri/target/release/bundle/nsis/*.exe
+          files: |
+            desktop/src-tauri/target/release/bundle/nsis/*.exe
+            antitube-backend.zip
           prerelease: true
           generate_release_notes: true
           body_path: release-notes.md

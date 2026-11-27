@@ -6,19 +6,31 @@
  */
 
 import vm from "node:vm";
-import { Constants, Innertube, Platform, YTNodes } from "youtubei.js";
+import type { Innertube } from "youtubei.js";
+
+// YouTube.js no va dentro del motor empaquetado: se carga aparte desde sus
+// archivos originales de npm (en la app, resources/backend/node_modules).
+type YouTubeLib = typeof import("youtubei.js");
+let library: Promise<YouTubeLib> | null = null;
+function youtubeLib(): Promise<YouTubeLib> {
+  library ??= import("youtubei.js").then((lib) => {
+    // El reproductor de YouTube trae una función que hay que ejecutar para descifrar
+    // algunas URLs (solo los clientes de respaldo; visionOS no la necesita). Se
+    // ejecuta en un contexto aislado de Node, sin acceso a nada del sistema.
+    lib.Platform.shim.eval = (data, env) => vm.runInNewContext(`${data.output}\nprocess(n, sp, sig);`, {
+      n: env.n ?? "", sp: env.sp ?? "", sig: env.sig ?? "", URL, URLSearchParams, TextEncoder, TextDecoder
+    }, { timeout: 3000 }) as Record<string, unknown>;
+    return lib;
+  });
+  return library;
+}
 import type { Types } from "youtubei.js";
 type InnerTubeClient = Types.InnerTubeClient;
 import { soundcloudClientId } from "./soundcloud.js";
 
 export type DirectAudio = { url: string; headers: Record<string, string>; duration: number | null; title: string | null; hls: boolean; mime: string | null; bitrate: number | null; via: string };
 
-// El reproductor de YouTube trae una función que hay que ejecutar para descifrar
-// algunas URLs (solo los clientes de respaldo; visionOS no la necesita). Se
-// ejecuta en un contexto aislado de Node, sin acceso a nada del sistema.
-Platform.shim.eval = (data, env) => vm.runInNewContext(`${data.output}\nprocess(n, sp, sig);`, {
-  n: env.n ?? "", sp: env.sp ?? "", sig: env.sig ?? "", URL, URLSearchParams, TextEncoder, TextDecoder
-}, { timeout: 3000 }) as Record<string, unknown>;
+
 
 export function youtubeVideoId(value: string): string | null {
   try {
@@ -47,7 +59,7 @@ function youtube(kind: "lite" | "full" = "lite"): Promise<Innertube> {
   const current = sessions[kind];
   if (!current || Date.now() - current.created > sessionLifetime) {
     const started = Date.now();
-    const client = Innertube.create({ retrieve_player: kind === "full", lang: "es", location: "ES" });
+    const client = youtubeLib().then((lib) => lib.Innertube.create({ retrieve_player: kind === "full", lang: "es", location: "ES" }));
     client.then(() => console.log(`[youtube] sesión ${kind === "full" ? "completa" : "ligera"} lista en ${Date.now() - started} ms`), (error) => {
       console.error(`[youtube] no se pudo abrir la sesión: ${error instanceof Error ? error.message : String(error)}`);
       sessions[kind] = null;
@@ -100,7 +112,7 @@ export async function youtubeDirect(url: string, skip: string[] = []): Promise<D
       if (!direct) { errors.push(`${client}: sin URL`); continue; }
       if (clientOrder[0] !== client) { clientOrder.splice(clientOrder.indexOf(client), 1); clientOrder.unshift(client); }
       console.log(`[youtube] ${videoId} con ${client} en ${Date.now() - started} ms (itag ${best.itag}, ${Math.round((best.bitrate ?? 0) / 1000)} kbps)`);
-      const agent = (Constants.CLIENTS as Record<string, { USER_AGENT?: string }>)[client]?.USER_AGENT;
+      const agent = ((await youtubeLib()).Constants.CLIENTS as Record<string, { USER_AGENT?: string }>)[client]?.USER_AGENT;
       return { url: direct, headers: agent ? { "User-Agent": agent } : {}, duration: info.basic_info.duration ?? null, title: info.basic_info.title ?? null, hls: false, mime: best.mime_type ?? null, bitrate: best.bitrate ?? null, via: client };
     } catch (error) {
       errors.push(`${client}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 160));
@@ -156,6 +168,7 @@ export type NativeSearchResult = { id: string; title: string; uploader: string |
 /** Búsqueda en YouTube con la sesión abierta: unos cientos de ms en vez de los 4-5 s de yt-dlp. */
 export async function youtubeSearch(query: string, limit: number): Promise<NativeSearchResult[]> {
   const yt = await youtube("lite");
+  const { YTNodes } = await youtubeLib();
   const search = await yt.search(query, { type: "video" });
   const found: NativeSearchResult[] = [];
   for (const node of search.results) {
@@ -171,6 +184,7 @@ export async function youtubeSearch(query: string, limit: number): Promise<Nativ
 /** Canciones de YouTube Music (con artista y duración de la canción). */
 export async function youtubeMusicSearch(query: string, limit: number): Promise<NativeSearchResult[]> {
   const yt = await youtube("lite");
+  const { YTNodes } = await youtubeLib();
   const search = await yt.music.search(query, { type: "song" });
   const found: NativeSearchResult[] = [];
   for (const node of search.songs?.contents ?? []) {
