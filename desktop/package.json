@@ -1,6 +1,6 @@
 {
   "name": "@antitube/desktop",
-  "version": "1.0.0-beta.16",
+  "version": "1.0.0-beta.17",
   "private": true,
   "scripts": {
     "prepare:resources": "node scripts/prepare.mjs",
