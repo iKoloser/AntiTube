@@ -92,6 +92,8 @@ jobs:
           files: |
             desktop/src-tauri/target/release/bundle/nsis/*.exe
             antitube-backend.zip
-          prerelease: true
+          # Las versiones con guion (1.0.0-beta.3) salen como prerelease; las demás, como estables.
+          prerelease: ${{ contains(steps.version.outputs.value, '-') }}
+          make_latest: ${{ !contains(steps.version.outputs.value, '-') }}
           generate_release_notes: true
           body_path: release-notes.md
